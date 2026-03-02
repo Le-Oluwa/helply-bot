@@ -1,27 +1,25 @@
-const { createClient } = require("@supabase/supabase-js");
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-console.log("BOT_TOKEN:", process.env.BOT_TOKEN);
-console.log("RUNNER_GROUP_ID:", process.env.RUNNER_GROUP_ID);
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
+const { createClient } = require("@supabase/supabase-js");
 
-
+// ================= ENV =================
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 if (!BOT_TOKEN || !RUNNER_GROUP_ID) {
-  console.error("❌ Missing BOT_TOKEN or RUNNER_GROUP_ID in .env");
+  console.error("❌ Missing BOT_TOKEN or RUNNER_GROUP_ID");
   process.exit(1);
 }
 
+// ================= SUPABASE =================
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// In-memory task store (MVP)
-const tasks = {};
+console.log("🤖 Helply bot is running...");
 
 // ================= START =================
 bot.onText(/\/start/, (msg) => {
@@ -33,22 +31,22 @@ bot.onText(/\/start/, (msg) => {
 
 Send your request in ONE message.
 
-Examples:
-• Buy water from cafeteria by 12pm, room D401
-• Get rice from Hephzibah by 11am, room F409
+Example:
+Buy rice by 12pm, room D401
 
-A trusted student runner will accept it.`,
+A trusted runner will accept it.`,
     { parse_mode: "Markdown" }
   );
 });
 
 // ================= USER REQUEST =================
-bot.on("message", (msg) => {
+bot.on("message", async (msg) => {
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
   const taskText = msg.text;
+  const taskId = Math.random().toString(36).substring(2, 9);
 
   const timeMatch = taskText.match(/by ([^,]+)/i);
   const time = timeMatch ? timeMatch[1] : "Not specified";
@@ -56,27 +54,17 @@ bot.on("message", (msg) => {
   const roomMatch = taskText.match(/room ([^,]+)/i);
   const location = roomMatch ? roomMatch[1] : "Not specified";
 
-  const taskId = Math.random().toString(36).substring(2, 9);
-
-bot.on("message", async (msg) => {
-  if (!msg.text) return;
-  if (msg.text.startsWith("/")) return;
-  if (msg.chat.type !== "private") return;
-
-  const taskId = Math.random().toString(36).substring(2, 9);
-
+  // Save to Supabase
   await supabase.from("orders").insert([
     {
       id: taskId,
       user_id: msg.chat.id.toString(),
-      task: msg.text,
+      task: taskText,
       status: "pending",
+      created_at: new Date(),
+      updated_at: new Date(),
     },
   ]);
-
-  bot.sendMessage(msg.chat.id, "Task saved.");
-});
-
 
   // Confirm user
   bot.sendMessage(
@@ -84,14 +72,14 @@ bot.on("message", async (msg) => {
     `✅ *Task Received*
 
 🆔 Task ID: \`${taskId}\`
-⏰ Time: ${time}
-📍 Location: ${location}
+⏰ ${time}
+📍 ${location}
 
-Waiting for a runner…`,
+Waiting for a runner...`,
     { parse_mode: "Markdown" }
   );
 
-  // Send to runners group with button
+  // Send to runners group
   bot.sendMessage(
     RUNNER_GROUP_ID,
     `🚨 *NEW HELPLY TASK*
@@ -116,8 +104,7 @@ Waiting for a runner…`,
   );
 });
 
-
-// ================= RUNNER ACCEPT & CANCEL =================
+// ================= ACCEPT / CANCEL =================
 bot.on("callback_query", async (query) => {
   const data = query.data;
   const runnerName = query.from.first_name;
@@ -126,34 +113,33 @@ bot.on("callback_query", async (query) => {
   // ================= ACCEPT =================
   if (data.startsWith("accept_")) {
     const taskId = data.split("_")[1];
-    const task = tasks[taskId];
 
-    if (!task) {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ Task not found",
-        show_alert: true,
-      });
-    }
+    // Check current status from DB
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
 
-    if (task.status !== "pending") {
+    if (!order || order.status !== "pending") {
       return bot.answerCallbackQuery(query.id, {
         text: "❌ Task already taken",
         show_alert: true,
       });
     }
 
-   await supabase
-  .from("orders")
-  .update({
-    status: "assigned",
-    runner_name: runnerName,
-    runner_id: runnerId.toString(),
-    updated_at: new Date(),
-  })
-  .eq("id", taskId);
-    task.runner = runnerName;
-    task.runnerId = runnerId;
+    // Update order
+    await supabase
+      .from("orders")
+      .update({
+        status: "assigned",
+        runner_name: runnerName,
+        runner_id: runnerId.toString(),
+        updated_at: new Date(),
+      })
+      .eq("id", taskId);
 
+    // Update group message
     bot.editMessageReplyMarkup(
       { inline_keyboard: [] },
       {
@@ -163,7 +149,9 @@ bot.on("callback_query", async (query) => {
     );
 
     bot.editMessageText(
-      `${query.message.text}\n\n✅ *Accepted by ${runnerName}*`,
+      `${query.message.text}
+
+✅ *Accepted by ${runnerName}*`,
       {
         chat_id: query.message.chat.id,
         message_id: query.message.message_id,
@@ -171,22 +159,21 @@ bot.on("callback_query", async (query) => {
       }
     );
 
+    // Notify user
     bot.sendMessage(
-      task.userId,
+      order.user_id,
       `🎉 *Your task has been accepted!*
 
-👤 Runner: ${runnerName}
-
-They’ll contact you shortly.`,
+👤 Runner: ${runnerName}`,
       { parse_mode: "Markdown" }
     );
 
-    // Send cancel option to runner privately
+    // Send cancel option to runner
     bot.sendMessage(
       runnerId,
-      `🛠 You accepted Task ID: ${taskId}
+      `You accepted Task ID: ${taskId}
 
-If you cannot continue, you may cancel:`,
+If you cannot continue:`,
       {
         reply_markup: {
           inline_keyboard: [
@@ -197,23 +184,14 @@ If you cannot continue, you may cancel:`,
     );
 
     return bot.answerCallbackQuery(query.id, {
-      text: "✅ You accepted this task",
+      text: "✅ Task assigned",
     });
   }
 
-  // ================= CANCEL =================
+  // ================= CANCEL BUTTON =================
   if (data.startsWith("cancel_")) {
     const taskId = data.split("_")[1];
-    const task = tasks[taskId];
 
-    if (!task || task.runnerId !== runnerId) {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ You cannot cancel this task",
-        show_alert: true,
-      });
-    }
-
-    // Ask for cancellation reason
     bot.sendMessage(
       runnerId,
       `Why are you cancelling Task ${taskId}?`,
@@ -236,33 +214,43 @@ If you cannot continue, you may cancel:`,
     const parts = data.split("_");
     const reason = parts[1];
     const taskId = parts[2];
-    const task = tasks[taskId];
 
-    if (!task) return;
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
 
-    // Reset task
-    task.status = "pending";
-    task.runner = null;
-    task.runnerId = null;
+    if (!order) return;
+
+    // Update DB
+    await supabase
+      .from("orders")
+      .update({
+        status: "cancelled",
+        cancel_reason: reason,
+        updated_at: new Date(),
+      })
+      .eq("id", taskId);
 
     // Notify user
     bot.sendMessage(
-      task.userId,
-      `⚠️ Your task was cancelled by the runner.
+      order.user_id,
+      `⚠️ Your task was cancelled.
 
 Reason: ${reason}
 
-We're reposting it now.`,
+Reposting now...`,
       { parse_mode: "Markdown" }
     );
 
-    // Repost task to runner group
+    // Repost to group
     bot.sendMessage(
       RUNNER_GROUP_ID,
       `🔁 *TASK REPOSTED*
 
 🆔 Task ID: \`${taskId}\`
-📌 ${task.task}`,
+📌 ${order.task}`,
       {
         parse_mode: "Markdown",
         reply_markup: {
@@ -273,7 +261,7 @@ We're reposting it now.`,
       }
     );
 
-    bot.sendMessage(runnerId, "❌ Task cancelled successfully.");
+    bot.sendMessage(runnerId, "❌ Task cancelled.");
 
     return bot.answerCallbackQuery(query.id);
   }
@@ -283,5 +271,3 @@ We're reposting it now.`,
 bot.on("polling_error", (err) => {
   console.error("Polling error:", err.message);
 });
-
-console.log("🤖 Helply bot is running with buttons...");
