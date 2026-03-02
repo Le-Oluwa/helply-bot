@@ -54,19 +54,19 @@ bot.on("message", async (msg) => {
   const roomMatch = taskText.match(/room ([^,]+)/i);
   const location = roomMatch ? roomMatch[1] : "Not specified";
 
-  // Save to Supabase
- await supabase.from("orders").insert([
-  {
-    id: taskId,
-    user_id: msg.chat.id.toString(),
-    task: taskText,
-    status: "pending",   // THIS IS REQUIRED
-    created_at: new Date(),
-    updated_at: new Date(),
-  },
-]);
+  // Insert into Supabase
+  await supabase.from("orders").insert([
+    {
+      id: taskId,
+      user_id: msg.chat.id.toString(),
+      task: taskText,
+      status: "pending",
+      created_at: new Date(),
+      updated_at: new Date(),
+    },
+  ]);
 
-  // Confirm user
+  // Confirm to user
   bot.sendMessage(
     msg.chat.id,
     `✅ *Task Received*
@@ -79,7 +79,7 @@ Waiting for a runner...`,
     { parse_mode: "Markdown" }
   );
 
-  // Send to runners group
+  // Send to runner group
   bot.sendMessage(
     RUNNER_GROUP_ID,
     `🚨 *NEW HELPLY TASK*
@@ -104,7 +104,7 @@ Waiting for a runner...`,
   );
 });
 
-// ================= ACCEPT / CANCEL =================
+// ================= CALLBACK HANDLER =================
 bot.on("callback_query", async (query) => {
   const data = query.data;
   const runnerName = query.from.first_name;
@@ -114,22 +114,8 @@ bot.on("callback_query", async (query) => {
   if (data.startsWith("accept_")) {
     const taskId = data.split("_")[1];
 
-    // Check current status from DB
-    const { data: order } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", taskId)
-      .single();
-
-    if (!order || order.status !== "pending") {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ Task already taken",
-        show_alert: true,
-      });
-    }
-
-    // Update order
-    await supabase
+    // Atomic update
+    const { data: updatedOrder, error } = await supabase
       .from("orders")
       .update({
         status: "assigned",
@@ -137,7 +123,24 @@ bot.on("callback_query", async (query) => {
         runner_id: runnerId.toString(),
         updated_at: new Date(),
       })
-      .eq("id", taskId);
+      .eq("id", taskId)
+      .eq("status", "pending")
+      .select();
+
+    if (error) {
+      console.error(error);
+      return bot.answerCallbackQuery(query.id, {
+        text: "Database error",
+        show_alert: true,
+      });
+    }
+
+    if (!updatedOrder || updatedOrder.length === 0) {
+      return bot.answerCallbackQuery(query.id, {
+        text: "❌ Task already taken",
+        show_alert: true,
+      });
+    }
 
     // Update group message
     bot.editMessageReplyMarkup(
@@ -161,26 +164,11 @@ bot.on("callback_query", async (query) => {
 
     // Notify user
     bot.sendMessage(
-      order.user_id,
+      updatedOrder[0].user_id,
       `🎉 *Your task has been accepted!*
 
 👤 Runner: ${runnerName}`,
       { parse_mode: "Markdown" }
-    );
-
-    // Send cancel option to runner
-    bot.sendMessage(
-      runnerId,
-      `You accepted Task ID: ${taskId}
-
-If you cannot continue:`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }],
-          ],
-        },
-      }
     );
 
     return bot.answerCallbackQuery(query.id, {
@@ -223,7 +211,6 @@ If you cannot continue:`,
 
     if (!order) return;
 
-    // Update DB
     await supabase
       .from("orders")
       .update({
@@ -233,7 +220,6 @@ If you cannot continue:`,
       })
       .eq("id", taskId);
 
-    // Notify user
     bot.sendMessage(
       order.user_id,
       `⚠️ Your task was cancelled.
@@ -244,7 +230,6 @@ Reposting now...`,
       { parse_mode: "Markdown" }
     );
 
-    // Repost to group
     bot.sendMessage(
       RUNNER_GROUP_ID,
       `🔁 *TASK REPOSTED*
