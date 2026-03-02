@@ -1,8 +1,11 @@
+console.log("BOT_TOKEN:", process.env.BOT_TOKEN);
+console.log("RUNNER_GROUP_ID:", process.env.RUNNER_GROUP_ID);
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 
+
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const RUNNER_GROUP_ID = Number(process.env.RUNNER_GROUP_ID);
+const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 if (!BOT_TOKEN || !RUNNER_GROUP_ID) {
   console.error("❌ Missing BOT_TOKEN or RUNNER_GROUP_ID in .env");
@@ -93,66 +96,159 @@ Waiting for a runner…`,
   );
 });
 
-// ================= RUNNER ACCEPT (BUTTON) =================
+
+// ================= RUNNER ACCEPT & CANCEL =================
 bot.on("callback_query", async (query) => {
   const data = query.data;
   const runnerName = query.from.first_name;
+  const runnerId = query.from.id;
 
-  if (!data.startsWith("accept_")) return;
+  // ================= ACCEPT =================
+  if (data.startsWith("accept_")) {
+    const taskId = data.split("_")[1];
+    const task = tasks[taskId];
 
-  const taskId = data.split("_")[1];
-  const task = tasks[taskId];
-
-  if (!task) {
-    return bot.answerCallbackQuery(query.id, {
-      text: "❌ Task not found",
-      show_alert: true,
-    });
-  }
-
-  if (task.status !== "pending") {
-    return bot.answerCallbackQuery(query.id, {
-      text: "❌ Task already taken",
-      show_alert: true,
-    });
-  }
-
-  // Lock task
-  task.status = "assigned";
-  task.runner = runnerName;
-
-  // Update runners group message
-  bot.editMessageReplyMarkup(
-    { inline_keyboard: [] },
-    {
-      chat_id: query.message.chat.id,
-      message_id: query.message.message_id,
+    if (!task) {
+      return bot.answerCallbackQuery(query.id, {
+        text: "❌ Task not found",
+        show_alert: true,
+      });
     }
-  );
 
-  bot.editMessageText(
-    `${query.message.text}\n\n✅ *Accepted by ${runnerName}*`,
-    {
-      chat_id: query.message.chat.id,
-      message_id: query.message.message_id,
-      parse_mode: "Markdown",
+    if (task.status !== "pending") {
+      return bot.answerCallbackQuery(query.id, {
+        text: "❌ Task already taken",
+        show_alert: true,
+      });
     }
-  );
 
-  // Notify user
-  bot.sendMessage(
-    task.userId,
-    `🎉 *Your task has been accepted!*
+    task.status = "assigned";
+    task.runner = runnerName;
+    task.runnerId = runnerId;
+
+    bot.editMessageReplyMarkup(
+      { inline_keyboard: [] },
+      {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+      }
+    );
+
+    bot.editMessageText(
+      `${query.message.text}\n\n✅ *Accepted by ${runnerName}*`,
+      {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        parse_mode: "Markdown",
+      }
+    );
+
+    bot.sendMessage(
+      task.userId,
+      `🎉 *Your task has been accepted!*
 
 👤 Runner: ${runnerName}
 
 They’ll contact you shortly.`,
-    { parse_mode: "Markdown" }
-  );
+      { parse_mode: "Markdown" }
+    );
 
-  bot.answerCallbackQuery(query.id, {
-    text: "✅ You accepted this task",
-  });
+    // Send cancel option to runner privately
+    bot.sendMessage(
+      runnerId,
+      `🛠 You accepted Task ID: ${taskId}
+
+If you cannot continue, you may cancel:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }],
+          ],
+        },
+      }
+    );
+
+    return bot.answerCallbackQuery(query.id, {
+      text: "✅ You accepted this task",
+    });
+  }
+
+  // ================= CANCEL =================
+  if (data.startsWith("cancel_")) {
+    const taskId = data.split("_")[1];
+    const task = tasks[taskId];
+
+    if (!task || task.runnerId !== runnerId) {
+      return bot.answerCallbackQuery(query.id, {
+        text: "❌ You cannot cancel this task",
+        show_alert: true,
+      });
+    }
+
+    // Ask for cancellation reason
+    bot.sendMessage(
+      runnerId,
+      `Why are you cancelling Task ${taskId}?`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Item unavailable", callback_data: `reason_unavailable_${taskId}` }],
+            [{ text: "Personal emergency", callback_data: `reason_emergency_${taskId}` }],
+            [{ text: "Too far", callback_data: `reason_distance_${taskId}` }],
+          ],
+        },
+      }
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+  // ================= CANCEL REASON =================
+  if (data.startsWith("reason_")) {
+    const parts = data.split("_");
+    const reason = parts[1];
+    const taskId = parts[2];
+    const task = tasks[taskId];
+
+    if (!task) return;
+
+    // Reset task
+    task.status = "pending";
+    task.runner = null;
+    task.runnerId = null;
+
+    // Notify user
+    bot.sendMessage(
+      task.userId,
+      `⚠️ Your task was cancelled by the runner.
+
+Reason: ${reason}
+
+We're reposting it now.`,
+      { parse_mode: "Markdown" }
+    );
+
+    // Repost task to runner group
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🔁 *TASK REPOSTED*
+
+🆔 Task ID: \`${taskId}\`
+📌 ${task.task}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }],
+          ],
+        },
+      }
+    );
+
+    bot.sendMessage(runnerId, "❌ Task cancelled successfully.");
+
+    return bot.answerCallbackQuery(query.id);
+  }
 });
 
 // ================= ERROR LOG =================
