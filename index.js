@@ -1,3 +1,9 @@
+const { createClient } = require("@supabase/supabase-js");
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 console.log("BOT_TOKEN:", process.env.BOT_TOKEN);
 console.log("RUNNER_GROUP_ID:", process.env.RUNNER_GROUP_ID);
 require("dotenv").config();
@@ -52,11 +58,25 @@ bot.on("message", (msg) => {
 
   const taskId = Math.random().toString(36).substring(2, 9);
 
-  tasks[taskId] = {
-    userId: msg.chat.id,
-    task: taskText,
-    status: "pending",
-  };
+bot.on("message", async (msg) => {
+  if (!msg.text) return;
+  if (msg.text.startsWith("/")) return;
+  if (msg.chat.type !== "private") return;
+
+  const taskId = Math.random().toString(36).substring(2, 9);
+
+  await supabase.from("orders").insert([
+    {
+      id: taskId,
+      user_id: msg.chat.id.toString(),
+      task: msg.text,
+      status: "pending",
+    },
+  ]);
+
+  bot.sendMessage(msg.chat.id, "Task saved.");
+});
+
 
   // Confirm user
   bot.sendMessage(
@@ -122,7 +142,15 @@ bot.on("callback_query", async (query) => {
       });
     }
 
-    task.status = "assigned";
+   await supabase
+  .from("orders")
+  .update({
+    status: "assigned",
+    runner_name: runnerName,
+    runner_id: runnerId.toString(),
+    updated_at: new Date(),
+  })
+  .eq("id", taskId);
     task.runner = runnerName;
     task.runnerId = runnerId;
 
