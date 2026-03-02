@@ -55,16 +55,16 @@ bot.on("message", async (msg) => {
   const location = roomMatch ? roomMatch[1] : "Not specified";
 
   // Save to Supabase
-  await supabase.from("orders").insert([
-    {
-      id: taskId,
-      user_id: msg.chat.id.toString(),
-      task: taskText,
-      status: "pending",
-      created_at: new Date(),
-      updated_at: new Date(),
-    },
-  ]);
+ await supabase.from("orders").insert([
+  {
+    id: taskId,
+    user_id: msg.chat.id.toString(),
+    task: taskText,
+    status: "pending",   // THIS IS REQUIRED
+    created_at: new Date(),
+    updated_at: new Date(),
+  },
+]);
 
   // Confirm user
   bot.sendMessage(
