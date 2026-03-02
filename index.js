@@ -127,13 +127,14 @@ bot.on("callback_query", async (query) => {
       .eq("status", "pending")
       .select();
 
-    if (error) {
-      console.error(error);
-      return bot.answerCallbackQuery(query.id, {
-        text: "Database error",
-        show_alert: true,
-      });
-    }
+   if (error) {
+  console.error("SUPABASE ERROR:", error);
+
+  return bot.answerCallbackQuery(query.id, {
+    text: error.message,
+    show_alert: true,
+  });
+}
 
     if (!updatedOrder || updatedOrder.length === 0) {
       return bot.answerCallbackQuery(query.id, {
