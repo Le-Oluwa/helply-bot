@@ -48,7 +48,9 @@ bot.on("message", async (msg) => {
   if (msg.chat.type !== "private") return;
 
   const taskText = msg.text;
-  const taskId = Math.random().toString(36).substring(2, 9);
+const taskId = Math.random().toString(36).substring(2, 9);
+
+console.log("INSERTING TASK ID:", taskId);
 
   const timeMatch = taskText.match(/by ([^,]+)/i);
   const time = timeMatch ? timeMatch[1] : "Not specified";
@@ -57,7 +59,9 @@ bot.on("message", async (msg) => {
   const location = roomMatch ? roomMatch[1] : "Not specified";
 
   // Insert into Supabase
-  await supabase.from("orders").insert([
+  const { error: insertError } = await supabase
+  .from("orders")
+  .insert([
     {
       id: taskId,
       user_id: msg.chat.id.toString(),
@@ -67,6 +71,8 @@ bot.on("message", async (msg) => {
       updated_at: new Date(),
     },
   ]);
+
+console.log("INSERT ERROR:", insertError);
 
   // Confirm to user
   bot.sendMessage(
