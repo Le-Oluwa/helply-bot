@@ -1,3 +1,5 @@
+console.log("SUPABASE_URL:", process.env.SUPABASE_URL);
+console.log("SUPABASE_KEY exists:", !!process.env.SUPABASE_KEY);
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
