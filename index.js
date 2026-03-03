@@ -114,70 +114,87 @@ bot.on("callback_query", async (query) => {
 
   // ================= ACCEPT =================
   if (data.startsWith("accept_")) {
-    const taskId = data.split("_")[1];
+  const taskId = data.split("_")[1];
 
-    // Atomic update
-    const { data: updatedOrder, error } = await supabase
-      .from("orders")
-      .update({
-        status: "assigned",
-        runner_name: runnerName,
-        runner_id: runnerId.toString(),
-        updated_at: new Date(),
-      })
-      .eq("id", taskId)
-      .eq("status", "pending")
-      .select();
+  console.log("TASK ID RECEIVED:", taskId);
 
-   if (error) {
-  console.error("SUPABASE ERROR:", error);
+  // 🔎 Fetch order first
+  const { data: order, error: fetchError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", taskId)
+    .single();
 
-  return bot.answerCallbackQuery(query.id, {
-    text: error.message,
-    show_alert: true,
-  });
-}
+  console.log("ORDER FROM DB:", order);
+  console.log("FETCH ERROR:", fetchError);
 
-    if (!updatedOrder || updatedOrder.length === 0) {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ Task already taken",
-        show_alert: true,
-      });
-    }
-
-    // Update group message
-    bot.editMessageReplyMarkup(
-      { inline_keyboard: [] },
-      {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-      }
-    );
-
-    bot.editMessageText(
-      `${query.message.text}
-
-✅ *Accepted by ${runnerName}*`,
-      {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        parse_mode: "Markdown",
-      }
-    );
-
-    // Notify user
-    bot.sendMessage(
-      updatedOrder[0].user_id,
-      `🎉 *Your task has been accepted!*
-
-👤 Runner: ${runnerName}`,
-      { parse_mode: "Markdown" }
-    );
-
+  if (fetchError || !order) {
     return bot.answerCallbackQuery(query.id, {
-      text: "✅ Task assigned",
+      text: "Task not found",
+      show_alert: true,
     });
   }
+
+  if (order.status === "assigned") {
+    return bot.answerCallbackQuery(query.id, {
+      text: "❌ Task already taken",
+      show_alert: true,
+    });
+  }
+
+  // 🔥 Update without status condition
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({
+      status: "assigned",
+      runner_name: runnerName,
+      runner_id: runnerId.toString(),
+      updated_at: new Date(),
+    })
+    .eq("id", taskId);
+
+  console.log("UPDATE ERROR:", updateError);
+
+  if (updateError) {
+    return bot.answerCallbackQuery(query.id, {
+      text: "Update failed",
+      show_alert: true,
+    });
+  }
+
+  // Update group message
+  bot.editMessageReplyMarkup(
+    { inline_keyboard: [] },
+    {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+    }
+  );
+
+  bot.editMessageText(
+    `${query.message.text}
+
+✅ *Accepted by ${runnerName}*`,
+    {
+      chat_id: query.message.chat.id,
+      message_id: query.message.message_id,
+      parse_mode: "Markdown",
+    }
+  );
+
+  // Notify user
+  bot.sendMessage(
+    order.user_id,
+    `🎉 *Your task has been accepted!*
+
+👤 Runner: ${runnerName}`,
+    { parse_mode: "Markdown" }
+  );
+
+  return bot.answerCallbackQuery(query.id, {
+    text: "✅ Task assigned",
+  });
+}
 
   // ================= CANCEL BUTTON =================
   if (data.startsWith("cancel_")) {
