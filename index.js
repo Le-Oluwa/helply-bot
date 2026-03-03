@@ -196,6 +196,25 @@ bot.on("callback_query", async (query) => {
 👤 Runner: ${runnerName}`,
     { parse_mode: "Markdown" }
   );
+  // Send cancel option to runner privately
+bot.sendMessage(
+  runnerId,
+  `🛠 You accepted Task ID: ${taskId}
+
+If you cannot complete it:`,
+  {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "❌ Cancel Task",
+            callback_data: `cancel_${taskId}`,
+          },
+        ],
+      ],
+    },
+  }
+);
 
   return bot.answerCallbackQuery(query.id, {
     text: "✅ Task assigned",
@@ -203,25 +222,39 @@ bot.on("callback_query", async (query) => {
 }
 
   // ================= CANCEL BUTTON =================
-  if (data.startsWith("cancel_")) {
-    const taskId = data.split("_")[1];
+  // ================= CANCEL BUTTON =================
+if (data.startsWith("cancel_")) {
+  const taskId = data.split("_")[1];
 
-    bot.sendMessage(
-      runnerId,
-      `Why are you cancelling Task ${taskId}?`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "Item unavailable", callback_data: `reason_unavailable_${taskId}` }],
-            [{ text: "Personal emergency", callback_data: `reason_emergency_${taskId}` }],
-            [{ text: "Too far", callback_data: `reason_distance_${taskId}` }],
-          ],
-        },
-      }
-    );
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", taskId)
+    .single();
 
-    return bot.answerCallbackQuery(query.id);
+  if (!order || order.runner_id !== runnerId.toString()) {
+    return bot.answerCallbackQuery(query.id, {
+      text: "❌ You cannot cancel this task",
+      show_alert: true,
+    });
   }
+
+  bot.sendMessage(
+    runnerId,
+    `Why are you cancelling Task ${taskId}?`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Item unavailable", callback_data: `reason_unavailable_${taskId}` }],
+          [{ text: "Personal emergency", callback_data: `reason_emergency_${taskId}` }],
+          [{ text: "Too far", callback_data: `reason_distance_${taskId}` }],
+        ],
+      },
+    }
+  );
+
+  return bot.answerCallbackQuery(query.id);
+}
 
   // ================= CANCEL REASON =================
   if (data.startsWith("reason_")) {
