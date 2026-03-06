@@ -27,20 +27,42 @@ console.log("🤖 Helply bot is running...");
 bot.onText(/\/start/, (msg) => {
   if (msg.chat.type !== "private") return;
 
-  bot.sendMessage(
-    msg.chat.id,
-    `👋 *Welcome to Helply*
+  const terms = `
+📜 *Helply Terms & Conditions*
 
-Send your request in ONE message.
+1️⃣ Users must provide accurate task details.
 
-Example:
-Buy rice by 12pm, room D401
+2️⃣ Service providers must perform tasks responsibly.
 
-A trusted runner will accept it.`,
-    { parse_mode: "Markdown" }
-  );
+3️⃣ Total cost = Item price + Runner fee + Platform fee.
+
+4️⃣ Helply only connects users and runners.
+
+5️⃣ Illegal activities are strictly prohibited.
+
+6️⃣ Repeated cancellations may lead to suspension.
+
+7️⃣ Item availability depends on vendor stock.
+
+8️⃣ Respectful communication is required.
+
+By clicking *Accept*, you agree to these terms.
+`;
+
+  bot.sendMessage(msg.chat.id, terms, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          {
+            text: "✅ Accept Terms",
+            callback_data: "accept_terms",
+          },
+        ],
+      ],
+    },
+  });
 });
-
 // ================= USER REQUEST =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
@@ -117,6 +139,23 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
   const runnerName = query.from.first_name;
   const runnerId = query.from.id;
+
+  // ================= TERMS ACCEPT =================
+if (data === "accept_terms") {
+
+  bot.sendMessage(
+    query.from.id,
+    `🎉 Welcome to *Helply*
+
+You can now send your request.
+
+Example:
+Buy rice by 12pm, room D401`,
+    { parse_mode: "Markdown" }
+  );
+
+  return bot.answerCallbackQuery(query.id);
+}
 
   // ================= ACCEPT =================
   if (data.startsWith("accept_")) {
