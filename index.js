@@ -74,6 +74,8 @@ bot.on("message", async (msg) => {
       .from("restaurants")
       .select("*");
 
+       console.log("RESTAURANTS FROM DB:", restaurants);
+
     if (!restaurants || restaurants.length === 0) {
       return bot.sendMessage(msg.chat.id, "No restaurants available.");
     }
