@@ -221,6 +221,9 @@ What do you need today?`,
       .select("*")
       .eq("restaurant_id", restaurantId);
 
+      console.log("RESTAURANT ID:", restaurantId);
+  console.log("MENU ITEMS:", menu);
+
     if (!menu || menu.length === 0) {
       return bot.sendMessage(query.from.id, "No menu items available.");
     }
