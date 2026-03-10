@@ -70,11 +70,12 @@ bot.on("message", async (msg) => {
   // ================= CAFETERIA RUN =================
   if (msg.text === "🍛 Cafeteria Runs") {
 
-    const { data: restaurants } = await supabase
-      .from("restaurants")
-      .select("*");
+    const { data: restaurants, error } = await supabase
+  .from("restaurants")
+  .select("*");
 
-       console.log("RESTAURANTS FROM DB:", restaurants);
+console.log("RESTAURANTS FROM DB:", restaurants);
+console.log("SUPABASE ERROR:", error);
 
     if (!restaurants || restaurants.length === 0) {
       return bot.sendMessage(msg.chat.id, "No restaurants available.");
