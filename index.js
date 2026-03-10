@@ -216,10 +216,14 @@ What do you need today?`,
 
     const restaurantId = data.split("_")[1];
 
-    const { data: menu } = await supabase
-      .from("menu_items")
-      .select("*")
-      .eq("restaurant_id", restaurantId);
+    const { data: menu, error } = await supabase
+  .from("menu_items")
+  .select("*")
+  .eq("restaurant_id", restaurantId);
+
+console.log("RESTAURANT ID:", restaurantId);
+console.log("MENU ITEMS:", menu);
+console.log("MENU ERROR:", error);
 
       console.log("RESTAURANT ID:", restaurantId);
   console.log("MENU ITEMS:", menu);
