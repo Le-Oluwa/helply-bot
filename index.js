@@ -19,6 +19,9 @@ const supabase = createClient(
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
+// ================= TEMP USER STATE =================
+const userState = {};
+
 console.log("🤖 Helply bot is running...");
 
 
@@ -60,6 +63,63 @@ bot.on("message", async (msg) => {
   if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
+  // ================= LOCATION INPUT =================
+  if (userState[msg.chat.id]) {
+
+    const location = msg.text;
+    const item = userState[msg.chat.id].item;
+    const total = userState[msg.chat.id].total;
+
+    const taskId = Math.random().toString(36).substring(2, 9);
+
+    await supabase
+      .from("orders")
+      .insert([
+        {
+          id: taskId,
+          user_id: msg.chat.id.toString(),
+          task: item.item_name,
+          delivery_location: location,
+          status: "pending",
+          created_at: new Date(),
+          updated_at: new Date()
+        }
+      ]);
+
+    delete userState[msg.chat.id];
+
+    bot.sendMessage(
+      msg.chat.id,
+      `✅ *Order Placed*
+
+🆔 Task ID: \`${taskId}\`
+📍 Delivery Location: ${location}
+
+Waiting for a runner...`,
+      { parse_mode: "Markdown" }
+    );
+
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🚨 *NEW HELPLY ORDER*
+
+🆔 Task ID: \`${taskId}\`
+🍛 Item: ${item.item_name}
+📍 Location: ${location}
+💰 Total: ₦${total}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }]
+          ]
+        }
+      }
+    );
+
+    return;
+  }
+
   // ================= CAFETERIA RUN =================
   if (msg.text === "🍛 Cafeteria Runs") {
 
@@ -82,7 +142,7 @@ bot.on("message", async (msg) => {
     );
   }
 
-  // ================= SHOPPING MALL =================
+  // ================= SHOPPING =================
   if (msg.text === "🛍 Shopping Mall Runs") {
 
     return bot.sendMessage(
@@ -92,7 +152,7 @@ bot.on("message", async (msg) => {
 Send what you want to buy.
 
 Example:
-Buy toothpaste from the shopping mall`,
+Buy toothpaste from the mall`,
       { parse_mode: "Markdown" }
     );
   }
@@ -107,54 +167,11 @@ Buy toothpaste from the shopping mall`,
 Describe the task clearly.
 
 Example:
-Help me print 20 pages.`,
+Help me print 20 pages`,
       { parse_mode: "Markdown" }
     );
   }
 
-  // ================= CREATE TASK =================
-
-  const taskText = msg.text;
-  const taskId = Math.random().toString(36).substring(2, 9);
-
-  await supabase
-    .from("orders")
-    .insert([
-      {
-        id: taskId,
-        user_id: msg.chat.id.toString(),
-        task: taskText,
-        status: "pending",
-        created_at: new Date(),
-        updated_at: new Date()
-      }
-    ]);
-
-  bot.sendMessage(
-    msg.chat.id,
-    `✅ *Task Received*
-
-🆔 Task ID: \`${taskId}\`
-
-Waiting for a runner...`,
-    { parse_mode: "Markdown" }
-  );
-
-  bot.sendMessage(
-    RUNNER_GROUP_ID,
-    `🚨 *NEW HELPLY TASK*
-
-🆔 Task ID: \`${taskId}\`
-📌 ${taskText}`,
-    {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }]
-        ]
-      }
-    }
-  );
 });
 
 
@@ -189,7 +206,6 @@ What do you need today?`,
     return bot.answerCallbackQuery(query.id);
   }
 
-
   // ================= RESTAURANT SELECT =================
   if (data.startsWith("restaurant_")) {
 
@@ -220,7 +236,6 @@ What do you need today?`,
     return bot.answerCallbackQuery(query.id);
   }
 
-
   // ================= MENU ITEM SELECT =================
   if (data.startsWith("item_")) {
 
@@ -240,6 +255,11 @@ What do you need today?`,
     const helplyFee = 100;
     const total = item.price + runnerFee + helplyFee;
 
+    userState[query.from.id] = {
+      item,
+      total
+    };
+
     bot.sendMessage(
       query.from.id,
       `🧾 *Order Summary*
@@ -250,13 +270,17 @@ Item Price: ₦${item.price}
 Runner Fee: ₦${runnerFee}
 Helply Fee: ₦${helplyFee}
 
-💰 *Total: ₦${total}*`,
+💰 *Total: ₦${total}*
+
+📍 Please type your *room number or delivery location*.
+
+Example:
+Room F409`,
       { parse_mode: "Markdown" }
     );
 
     return bot.answerCallbackQuery(query.id);
   }
-
 
   // ================= ACCEPT TASK =================
   if (data.startsWith("accept_")) {
@@ -270,30 +294,30 @@ Helply Fee: ₦${helplyFee}
       .single();
 
     if (!order || order.status === "assigned") {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ Task already taken",
-        show_alert: true
+      return bot.answerCallbackQuery(query.id,{
+        text:"❌ Task already taken",
+        show_alert:true
       });
     }
 
     await supabase
       .from("orders")
       .update({
-        status: "assigned",
-        runner_name: runnerName,
-        runner_id: runnerId.toString(),
-        updated_at: new Date()
+        status:"assigned",
+        runner_name:runnerName,
+        runner_id:runnerId.toString(),
+        updated_at:new Date()
       })
-      .eq("id", taskId);
+      .eq("id",taskId);
 
     bot.editMessageText(
       `${query.message.text}
 
 ✅ *Accepted by ${runnerName}*`,
       {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        parse_mode: "Markdown"
+        chat_id:query.message.chat.id,
+        message_id:query.message.message_id,
+        parse_mode:"Markdown"
       }
     );
 
@@ -302,17 +326,17 @@ Helply Fee: ₦${helplyFee}
       `🎉 *Your task has been accepted!*
 
 Runner: ${runnerName}`,
-      { parse_mode: "Markdown" }
+      {parse_mode:"Markdown"}
     );
 
     bot.sendMessage(
       runnerId,
       `🛠 You accepted Task ID: ${taskId}`,
       {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }],
-            [{ text: "📦 Confirm Delivery", callback_data: `complete_${taskId}` }]
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"❌ Cancel Task",callback_data:`cancel_${taskId}`}],
+            [{text:"📦 Confirm Delivery",callback_data:`complete_${taskId}`}]
           ]
         }
       }
@@ -321,27 +345,24 @@ Runner: ${runnerName}`,
     return bot.answerCallbackQuery(query.id);
   }
 
-
-  // ================= RUNNER DELIVERY =================
+  // ================= DELIVERY =================
   if (data.startsWith("complete_")) {
 
-    const taskId = data.split("_")[1];
+    const taskId=data.split("_")[1];
 
-    const { data: order } = await supabase
+    const {data:order}=await supabase
       .from("orders")
       .select("*")
-      .eq("id", taskId)
+      .eq("id",taskId)
       .single();
-
-    if (!order) return;
 
     await supabase
       .from("orders")
       .update({
-        status: "delivered",
-        updated_at: new Date()
+        status:"delivered",
+        updated_at:new Date()
       })
-      .eq("id", taskId);
+      .eq("id",taskId);
 
     bot.sendMessage(
       order.user_id,
@@ -349,10 +370,10 @@ Runner: ${runnerName}`,
 
 Please confirm receipt.`,
       {
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Confirm Order Received", callback_data: `userconfirm_${taskId}` }]
+        parse_mode:"Markdown",
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"✅ Confirm Order Received",callback_data:`userconfirm_${taskId}`}]
           ]
         }
       }
@@ -363,50 +384,27 @@ Please confirm receipt.`,
     return bot.answerCallbackQuery(query.id);
   }
 
-
   // ================= USER CONFIRM =================
   if (data.startsWith("userconfirm_")) {
 
-    const taskId = data.split("_")[1];
+    const taskId=data.split("_")[1];
 
-    const { data: order } = await supabase
+    const {data:order}=await supabase
       .from("orders")
       .select("*")
-      .eq("id", taskId)
+      .eq("id",taskId)
       .single();
 
-    if (!order) return;
-
     await supabase
       .from("orders")
       .update({
-        status: "completed",
-        completed_at: new Date()
+        status:"completed",
+        completed_at:new Date()
       })
-      .eq("id", taskId);
+      .eq("id",taskId);
 
     bot.sendMessage(order.user_id,"✅ Order confirmed. Thank you!");
-
-    bot.sendMessage(order.runner_id,"🎉 Delivery confirmed by user!");
-
-    return bot.answerCallbackQuery(query.id);
-  }
-
-
-  // ================= CANCEL =================
-  if (data.startsWith("cancel_")) {
-
-    const taskId = data.split("_")[1];
-
-    await supabase
-      .from("orders")
-      .update({
-        status: "cancelled",
-        updated_at: new Date()
-      })
-      .eq("id", taskId);
-
-    bot.sendMessage(query.from.id,"❌ Task cancelled.");
+    bot.sendMessage(order.runner_id,"🎉 Delivery confirmed!");
 
     return bot.answerCallbackQuery(query.id);
   }
@@ -414,7 +412,7 @@ Please confirm receipt.`,
 });
 
 
-// ================= ERROR LOG =================
-bot.on("polling_error", (err) => {
-  console.log("Polling Error:", err.message);
+// ================= ERROR =================
+bot.on("polling_error",(err)=>{
+  console.log("Polling Error:",err.message);
 });
