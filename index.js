@@ -19,7 +19,7 @@ const supabase = createClient(
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// ================= TEMP USER STATE =================
+// ================= USER SESSION =================
 const userState = {};
 
 console.log("🤖 Helply bot is running...");
@@ -33,16 +33,16 @@ bot.onText(/\/start/, (msg) => {
   const terms = `
 📜 *Helply Terms & Conditions*
 
-1️⃣ Users must provide accurate task details.
-2️⃣ Service providers must perform tasks responsibly.
+1️⃣ Provide accurate task details.
+2️⃣ Runners must perform tasks responsibly.
 3️⃣ Total cost = Item price + Runner fee + Platform fee.
-4️⃣ Helply only connects users and runners.
-5️⃣ Illegal activities are prohibited.
+4️⃣ Helply connects users and runners.
+5️⃣ Illegal activities prohibited.
 6️⃣ Repeated cancellations may lead to suspension.
-7️⃣ Item availability depends on vendor stock.
-8️⃣ Respectful communication is required.
+7️⃣ Item availability depends on vendors.
+8️⃣ Respectful communication required.
 
-By clicking *Accept*, you agree to these terms.
+Click *Accept* to continue.
 `;
 
   bot.sendMessage(msg.chat.id, terms, {
@@ -63,55 +63,41 @@ bot.on("message", async (msg) => {
   if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
-  // ================= LOCATION INPUT =================
-  if (userState[msg.chat.id]) {
+  const userId = msg.chat.id;
 
-    const location = msg.text;
-    const item = userState[msg.chat.id].item;
-    const total = userState[msg.chat.id].total;
+  // ================= QUANTITY INPUT =================
+  if (userState[userId] && userState[userId].awaitingQuantity) {
 
-    const taskId = Math.random().toString(36).substring(2, 9);
+    const qty = parseInt(msg.text);
 
-    await supabase
-      .from("orders")
-      .insert([
-        {
-          id: taskId,
-          user_id: msg.chat.id.toString(),
-          task: item.item_name,
-          delivery_location: location,
-          status: "pending",
-          created_at: new Date(),
-          updated_at: new Date()
-        }
-      ]);
+    if (isNaN(qty) || qty <= 0) {
+      return bot.sendMessage(userId,"Please enter a valid quantity.");
+    }
 
-    delete userState[msg.chat.id];
+    const item = userState[userId].selectedItem;
+
+    userState[userId].cart.push({
+      name: item.item_name,
+      price: item.price,
+      qty
+    });
+
+    userState[userId].awaitingQuantity = false;
 
     bot.sendMessage(
-      msg.chat.id,
-      `✅ *Order Placed*
-
-🆔 Task ID: \`${taskId}\`
-📍 Delivery Location: ${location}
-
-Waiting for a runner...`,
-      { parse_mode: "Markdown" }
+      userId,
+      `✅ Added *${item.item_name} x${qty}* to cart.`,
+      { parse_mode:"Markdown" }
     );
 
     bot.sendMessage(
-      RUNNER_GROUP_ID,
-      `🚨 *NEW HELPLY ORDER*
-
-🆔 Task ID: \`${taskId}\`
-🍛 Item: ${item.item_name}
-📍 Location: ${location}
-💰 Total: ₦${total}`,
+      userId,
+      "What would you like to do next?",
       {
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }]
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"➕ Add Another Item",callback_data:`restaurant_${userState[userId].restaurantId}`}],
+            [{text:"🧾 Checkout",callback_data:"checkout"}]
           ]
         }
       }
@@ -120,55 +106,91 @@ Waiting for a runner...`,
     return;
   }
 
-  // ================= CAFETERIA RUN =================
+  // ================= LOCATION INPUT =================
+  if (userState[userId] && userState[userId].awaitingLocation) {
+
+    const location = msg.text;
+
+    const cart = userState[userId].cart;
+
+    let itemsText = "";
+    let subtotal = 0;
+
+    cart.forEach(item=>{
+      itemsText += `${item.name} x${item.qty}\n`;
+      subtotal += item.price * item.qty;
+    });
+
+    const runnerFee = 300;
+    const helplyFee = 100;
+    const total = subtotal + runnerFee + helplyFee;
+
+    const taskId = Math.random().toString(36).substring(2,9);
+
+    await supabase.from("orders").insert([{
+      id:taskId,
+      user_id:userId.toString(),
+      task:itemsText,
+      delivery_location:location,
+      status:"pending",
+      created_at:new Date(),
+      updated_at:new Date()
+    }]);
+
+    delete userState[userId];
+
+    bot.sendMessage(
+      userId,
+      `✅ *Order Placed*
+
+🆔 Task ID: \`${taskId}\`
+📍 Location: ${location}
+
+Waiting for a runner...`,
+      {parse_mode:"Markdown"}
+    );
+
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🚨 *NEW HELPLY ORDER*
+
+🆔 Task ID: \`${taskId}\`
+
+🧾 Items:
+${itemsText}
+
+📍 Location: ${location}
+💰 Total: ₦${total}`,
+      {
+        parse_mode:"Markdown",
+        reply_markup:{
+          inline_keyboard:[
+            [{text:"✅ Accept Task",callback_data:`accept_${taskId}`}]
+          ]
+        }
+      }
+    );
+
+    return;
+  }
+
+  // ================= CAFETERIA =================
   if (msg.text === "🍛 Cafeteria Runs") {
 
-    const { data: restaurants } = await supabase
+    const {data:restaurants} = await supabase
       .from("restaurants")
       .select("*");
 
-    if (!restaurants || restaurants.length === 0) {
-      return bot.sendMessage(msg.chat.id, "No restaurants available.");
-    }
+    if (!restaurants) return;
 
-    const buttons = restaurants.map(r => [
-      { text: r.name, callback_data: `restaurant_${r.id}` }
+    const buttons = restaurants.map(r=>[
+      {text:r.name,callback_data:`restaurant_${r.id}`}
     ]);
 
-    return bot.sendMessage(
+    bot.sendMessage(
       msg.chat.id,
       "🍛 Choose a restaurant:",
-      { reply_markup: { inline_keyboard: buttons } }
-    );
-  }
-
-  // ================= SHOPPING =================
-  if (msg.text === "🛍 Shopping Mall Runs") {
-
-    return bot.sendMessage(
-      msg.chat.id,
-      `🛍 *Shopping Mall Run*
-
-Send what you want to buy.
-
-Example:
-Buy toothpaste from the mall`,
-      { parse_mode: "Markdown" }
-    );
-  }
-
-  // ================= CUSTOM ERRAND =================
-  if (msg.text === "🏃 Custom Errands") {
-
-    return bot.sendMessage(
-      msg.chat.id,
-      `🏃 *Custom Errand*
-
-Describe the task clearly.
-
-Example:
-Help me print 20 pages`,
-      { parse_mode: "Markdown" }
+      {reply_markup:{inline_keyboard:buttons}}
     );
   }
 
@@ -176,29 +198,29 @@ Help me print 20 pages`,
 
 
 // ================= CALLBACK HANDLER =================
-bot.on("callback_query", async (query) => {
+bot.on("callback_query", async (query)=>{
 
   const data = query.data;
+  const userId = query.from.id;
+
   const runnerName = query.from.first_name;
   const runnerId = query.from.id;
 
   // ================= TERMS ACCEPT =================
-  if (data === "accept_terms") {
+  if (data==="accept_terms"){
 
     bot.sendMessage(
-      query.from.id,
-      `🎉 *Welcome to Helply*
-
-What do you need today?`,
+      userId,
+      "🎉 Welcome to *Helply*\n\nWhat do you need today?",
       {
-        parse_mode: "Markdown",
-        reply_markup: {
-          keyboard: [
+        parse_mode:"Markdown",
+        reply_markup:{
+          keyboard:[
             ["🍛 Cafeteria Runs"],
             ["🛍 Shopping Mall Runs"],
             ["🏃 Custom Errands"]
           ],
-          resize_keyboard: true
+          resize_keyboard:true
         }
       }
     );
@@ -206,136 +228,109 @@ What do you need today?`,
     return bot.answerCallbackQuery(query.id);
   }
 
-  // ================= RESTAURANT SELECT =================
-  if (data.startsWith("restaurant_")) {
+  // ================= RESTAURANT =================
+  if (data.startsWith("restaurant_")){
 
     const restaurantId = data.split("_")[1];
 
-    const { data: menu } = await supabase
+    userState[userId] = {
+      cart:[],
+      restaurantId
+    };
+
+    const {data:menu} = await supabase
       .from("menu_items")
       .select("*")
-      .eq("restaurant_id", restaurantId);
+      .eq("restaurant_id",restaurantId);
 
-    if (!menu || menu.length === 0) {
-      return bot.sendMessage(query.from.id, "No menu items available.");
-    }
-
-    const buttons = menu.map(item => [
+    const buttons = menu.map(item=>[
       {
-        text: `${item.item_name} — ₦${item.price}`,
-        callback_data: `item_${item.id}`
+        text:`${item.item_name} — ₦${item.price}`,
+        callback_data:`item_${item.id}`
       }
     ]);
 
     bot.sendMessage(
-      query.from.id,
-      "🍛 Select what you want:",
-      { reply_markup: { inline_keyboard: buttons } }
+      userId,
+      "Select item:",
+      {reply_markup:{inline_keyboard:buttons}}
     );
 
     return bot.answerCallbackQuery(query.id);
   }
 
-  // ================= MENU ITEM SELECT =================
-  if (data.startsWith("item_")) {
+  // ================= ITEM =================
+  if (data.startsWith("item_")){
 
     const itemId = data.split("_")[1];
 
-    const { data: item } = await supabase
+    const {data:item} = await supabase
       .from("menu_items")
       .select("*")
-      .eq("id", itemId)
+      .eq("id",itemId)
       .single();
 
-    if (!item) {
-      return bot.sendMessage(query.from.id, "Item not found.");
-    }
-
-    const runnerFee = 300;
-    const helplyFee = 100;
-    const total = item.price + runnerFee + helplyFee;
-
-    userState[query.from.id] = {
-      item,
-      total
-    };
+    userState[userId].selectedItem = item;
+    userState[userId].awaitingQuantity = true;
 
     bot.sendMessage(
-      query.from.id,
-      `🧾 *Order Summary*
+      userId,
+      `How many *${item.item_name}* would you like?`,
+      {parse_mode:"Markdown"}
+    );
 
-Item: ${item.item_name}
+    return bot.answerCallbackQuery(query.id);
+  }
 
-Item Price: ₦${item.price}
-Runner Fee: ₦${runnerFee}
-Helply Fee: ₦${helplyFee}
+  // ================= CHECKOUT =================
+  if (data==="checkout"){
 
-💰 *Total: ₦${total}*
+    userState[userId].awaitingLocation = true;
 
-📍 Please type your *room number or delivery location*.
-
-Example:
-Room F409`,
-      { parse_mode: "Markdown" }
+    bot.sendMessage(
+      userId,
+      "📍 Please type your delivery location.\nExample: Room F409"
     );
 
     return bot.answerCallbackQuery(query.id);
   }
 
   // ================= ACCEPT TASK =================
-  if (data.startsWith("accept_")) {
+  if (data.startsWith("accept_")){
 
     const taskId = data.split("_")[1];
 
-    const { data: order } = await supabase
+    const {data:order} = await supabase
       .from("orders")
       .select("*")
-      .eq("id", taskId)
+      .eq("id",taskId)
       .single();
 
-    if (!order || order.status === "assigned") {
+    if (!order || order.status==="assigned"){
       return bot.answerCallbackQuery(query.id,{
-        text:"❌ Task already taken",
+        text:"Task already taken",
         show_alert:true
       });
     }
 
-    await supabase
-      .from("orders")
-      .update({
-        status:"assigned",
-        runner_name:runnerName,
-        runner_id:runnerId.toString(),
-        updated_at:new Date()
-      })
-      .eq("id",taskId);
-
-    bot.editMessageText(
-      `${query.message.text}
-
-✅ *Accepted by ${runnerName}*`,
-      {
-        chat_id:query.message.chat.id,
-        message_id:query.message.message_id,
-        parse_mode:"Markdown"
-      }
-    );
+    await supabase.from("orders").update({
+      status:"assigned",
+      runner_name:runnerName,
+      runner_id:runnerId.toString()
+    }).eq("id",taskId);
 
     bot.sendMessage(
       order.user_id,
-      `🎉 *Your task has been accepted!*
-
-Runner: ${runnerName}`,
+      `🎉 Runner *${runnerName}* accepted your order.`,
       {parse_mode:"Markdown"}
     );
 
     bot.sendMessage(
       runnerId,
-      `🛠 You accepted Task ID: ${taskId}`,
+      "Task accepted.",
       {
         reply_markup:{
           inline_keyboard:[
-            [{text:"❌ Cancel Task",callback_data:`cancel_${taskId}`}],
             [{text:"📦 Confirm Delivery",callback_data:`complete_${taskId}`}]
           ]
         }
@@ -346,31 +341,24 @@ Runner: ${runnerName}`,
   }
 
   // ================= DELIVERY =================
-  if (data.startsWith("complete_")) {
+  if (data.startsWith("complete_")){
 
-    const taskId=data.split("_")[1];
+    const taskId = data.split("_")[1];
 
-    const {data:order}=await supabase
+    const {data:order} = await supabase
       .from("orders")
       .select("*")
       .eq("id",taskId)
       .single();
 
-    await supabase
-      .from("orders")
-      .update({
-        status:"delivered",
-        updated_at:new Date()
-      })
-      .eq("id",taskId);
+    await supabase.from("orders").update({
+      status:"delivered"
+    }).eq("id",taskId);
 
     bot.sendMessage(
       order.user_id,
-      `📦 *Your order has been delivered.*
-
-Please confirm receipt.`,
+      "📦 Your order has arrived.\nPlease confirm receipt.",
       {
-        parse_mode:"Markdown",
         reply_markup:{
           inline_keyboard:[
             [{text:"✅ Confirm Order Received",callback_data:`userconfirm_${taskId}`}]
@@ -379,32 +367,19 @@ Please confirm receipt.`,
       }
     );
 
-    bot.sendMessage(runnerId,"Waiting for user confirmation.");
-
     return bot.answerCallbackQuery(query.id);
   }
 
   // ================= USER CONFIRM =================
-  if (data.startsWith("userconfirm_")) {
+  if (data.startsWith("userconfirm_")){
 
-    const taskId=data.split("_")[1];
+    const taskId = data.split("_")[1];
 
-    const {data:order}=await supabase
-      .from("orders")
-      .select("*")
-      .eq("id",taskId)
-      .single();
+    await supabase.from("orders").update({
+      status:"completed"
+    }).eq("id",taskId);
 
-    await supabase
-      .from("orders")
-      .update({
-        status:"completed",
-        completed_at:new Date()
-      })
-      .eq("id",taskId);
-
-    bot.sendMessage(order.user_id,"✅ Order confirmed. Thank you!");
-    bot.sendMessage(order.runner_id,"🎉 Delivery confirmed!");
+    bot.sendMessage(userId,"✅ Order completed. Thank you!");
 
     return bot.answerCallbackQuery(query.id);
   }
@@ -414,5 +389,5 @@ Please confirm receipt.`,
 
 // ================= ERROR =================
 bot.on("polling_error",(err)=>{
-  console.log("Polling Error:",err.message);
+  console.log(err.message);
 });
