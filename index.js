@@ -24,25 +24,19 @@ console.log("🤖 Helply bot is running...");
 
 // ================= START =================
 bot.onText(/\/start/, (msg) => {
+
   if (msg.chat.type !== "private") return;
 
   const terms = `
 📜 *Helply Terms & Conditions*
 
 1️⃣ Users must provide accurate task details.
-
 2️⃣ Service providers must perform tasks responsibly.
-
 3️⃣ Total cost = Item price + Runner fee + Platform fee.
-
 4️⃣ Helply only connects users and runners.
-
-5️⃣ Illegal activities are strictly prohibited.
-
+5️⃣ Illegal activities are prohibited.
 6️⃣ Repeated cancellations may lead to suspension.
-
 7️⃣ Item availability depends on vendor stock.
-
 8️⃣ Respectful communication is required.
 
 By clicking *Accept*, you agree to these terms.
@@ -70,28 +64,22 @@ bot.on("message", async (msg) => {
   // ================= CAFETERIA RUN =================
   if (msg.text === "🍛 Cafeteria Runs") {
 
-    const { data: restaurants, error } = await supabase
-  .from("restaurants")
-  .select("*");
-
-console.log("RESTAURANTS FROM DB:", restaurants);
-console.log("SUPABASE ERROR:", error);
+    const { data: restaurants } = await supabase
+      .from("restaurants")
+      .select("*");
 
     if (!restaurants || restaurants.length === 0) {
       return bot.sendMessage(msg.chat.id, "No restaurants available.");
     }
 
-    const buttons = restaurants.map(r => [{
-      text: r.name,
-      callback_data: `restaurant_${r.id}`
-    }]);
+    const buttons = restaurants.map(r => [
+      { text: r.name, callback_data: `restaurant_${r.id}` }
+    ]);
 
     return bot.sendMessage(
       msg.chat.id,
       "🍛 Choose a restaurant:",
-      {
-        reply_markup: { inline_keyboard: buttons }
-      }
+      { reply_markup: { inline_keyboard: buttons } }
     );
   }
 
@@ -133,7 +121,7 @@ Help me print 20 pages.`,
   const taskText = msg.text;
   const taskId = Math.random().toString(36).substring(2, 9);
 
-  const { error } = await supabase
+  await supabase
     .from("orders")
     .insert([
       {
@@ -145,8 +133,6 @@ Help me print 20 pages.`,
         updated_at: new Date()
       }
     ]);
-
-  console.log("INSERT ERROR:", error);
 
   bot.sendMessage(
     msg.chat.id,
@@ -210,44 +196,35 @@ What do you need today?`,
   }
 
 
-
   // ================= RESTAURANT SELECT =================
   if (data.startsWith("restaurant_")) {
 
     const restaurantId = data.split("_")[1];
 
-    const { data: menu, error } = await supabase
-  .from("menu_items")
-  .select("*")
-  .eq("restaurant_id", restaurantId);
-
-console.log("RESTAURANT ID:", restaurantId);
-console.log("MENU ITEMS:", menu);
-console.log("MENU ERROR:", error);
-
-      console.log("RESTAURANT ID:", restaurantId);
-  console.log("MENU ITEMS:", menu);
+    const { data: menu } = await supabase
+      .from("menu_items")
+      .select("*")
+      .eq("restaurant_id", restaurantId);
 
     if (!menu || menu.length === 0) {
       return bot.sendMessage(query.from.id, "No menu items available.");
     }
 
-    const buttons = menu.map(item => [{
-      text: `${item.item_name} — ₦${item.price}`,
-      callback_data: `item_${item.id}`
-    }]);
+    const buttons = menu.map(item => [
+      {
+        text: `${item.item_name} — ₦${item.price}`,
+        callback_data: `item_${item.id}`
+      }
+    ]);
 
     bot.sendMessage(
       query.from.id,
       "🍛 Select what you want:",
-      {
-        reply_markup: { inline_keyboard: buttons }
-      }
+      { reply_markup: { inline_keyboard: buttons } }
     );
 
     return bot.answerCallbackQuery(query.id);
   }
-
 
 
   // ================= MENU ITEM SELECT =================
@@ -335,25 +312,119 @@ Runner: ${runnerName}`,
       { parse_mode: "Markdown" }
     );
 
+    // SEND CANCEL BUTTON
+    bot.sendMessage(
+      runnerId,
+      `🛠 You accepted Task ID: ${taskId}
+
+If you cannot complete it:`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "❌ Cancel Task",
+                callback_data: `cancel_${taskId}`
+              }
+            ]
+          ]
+        }
+      }
+    );
+
     return bot.answerCallbackQuery(query.id);
   }
 
 
 
-  // ================= CANCEL =================
+  // ================= CANCEL BUTTON =================
   if (data.startsWith("cancel_")) {
 
     const taskId = data.split("_")[1];
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
+
+    if (!order || order.runner_id !== runnerId.toString()) {
+      return bot.answerCallbackQuery(query.id, {
+        text: "❌ You cannot cancel this task",
+        show_alert: true
+      });
+    }
+
+    bot.sendMessage(
+      runnerId,
+      `Why are you cancelling Task ${taskId}?`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "Item unavailable", callback_data: `reason_unavailable_${taskId}` }],
+            [{ text: "Personal emergency", callback_data: `reason_emergency_${taskId}` }],
+            [{ text: "Too far", callback_data: `reason_distance_${taskId}` }]
+          ]
+        }
+      }
+    );
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+
+
+  // ================= CANCEL REASON =================
+  if (data.startsWith("reason_")) {
+
+    const parts = data.split("_");
+    const reason = parts[1];
+    const taskId = parts[2];
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
+
+    if (!order) return;
 
     await supabase
       .from("orders")
       .update({
         status: "cancelled",
+        cancel_reason: reason,
         updated_at: new Date()
       })
       .eq("id", taskId);
 
-    bot.sendMessage(query.from.id, "❌ Task cancelled.");
+    bot.sendMessage(
+      order.user_id,
+      `⚠️ Your task was cancelled.
+
+Reason: ${reason}
+
+Reposting task now.`,
+      { parse_mode: "Markdown" }
+    );
+
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🔁 *TASK REPOSTED*
+
+🆔 Task ID: \`${taskId}\`
+📌 ${order.task}`,
+      {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }]
+          ]
+        }
+      }
+    );
+
+    bot.sendMessage(runnerId, "❌ Task cancelled successfully.");
 
     return bot.answerCallbackQuery(query.id);
   }
