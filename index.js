@@ -60,7 +60,6 @@ bot.on("message", async (msg) => {
   if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
-
   // ================= CAFETERIA RUN =================
   if (msg.text === "🍛 Cafeteria Runs") {
 
@@ -83,7 +82,6 @@ bot.on("message", async (msg) => {
     );
   }
 
-
   // ================= SHOPPING MALL =================
   if (msg.text === "🛍 Shopping Mall Runs") {
 
@@ -99,7 +97,6 @@ Buy toothpaste from the shopping mall`,
     );
   }
 
-
   // ================= CUSTOM ERRAND =================
   if (msg.text === "🏃 Custom Errands") {
 
@@ -114,7 +111,6 @@ Help me print 20 pages.`,
       { parse_mode: "Markdown" }
     );
   }
-
 
   // ================= CREATE TASK =================
 
@@ -162,14 +158,12 @@ Waiting for a runner...`,
 });
 
 
-
 // ================= CALLBACK HANDLER =================
 bot.on("callback_query", async (query) => {
 
   const data = query.data;
   const runnerName = query.from.first_name;
   const runnerId = query.from.id;
-
 
   // ================= TERMS ACCEPT =================
   if (data === "accept_terms") {
@@ -264,7 +258,6 @@ Helply Fee: ₦${helplyFee}
   }
 
 
-
   // ================= ACCEPT TASK =================
   if (data.startsWith("accept_")) {
 
@@ -312,21 +305,14 @@ Runner: ${runnerName}`,
       { parse_mode: "Markdown" }
     );
 
-    // SEND CANCEL BUTTON
     bot.sendMessage(
       runnerId,
-      `🛠 You accepted Task ID: ${taskId}
-
-If you cannot complete it:`,
+      `🛠 You accepted Task ID: ${taskId}`,
       {
         reply_markup: {
           inline_keyboard: [
-            [
-              {
-                text: "❌ Cancel Task",
-                callback_data: `cancel_${taskId}`
-              }
-            ]
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }],
+            [{ text: "📦 Confirm Delivery", callback_data: `complete_${taskId}` }]
           ]
         }
       }
@@ -336,50 +322,10 @@ If you cannot complete it:`,
   }
 
 
-
-  // ================= CANCEL BUTTON =================
-  if (data.startsWith("cancel_")) {
+  // ================= RUNNER DELIVERY =================
+  if (data.startsWith("complete_")) {
 
     const taskId = data.split("_")[1];
-
-    const { data: order } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", taskId)
-      .single();
-
-    if (!order || order.runner_id !== runnerId.toString()) {
-      return bot.answerCallbackQuery(query.id, {
-        text: "❌ You cannot cancel this task",
-        show_alert: true
-      });
-    }
-
-    bot.sendMessage(
-      runnerId,
-      `Why are you cancelling Task ${taskId}?`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "Item unavailable", callback_data: `reason_unavailable_${taskId}` }],
-            [{ text: "Personal emergency", callback_data: `reason_emergency_${taskId}` }],
-            [{ text: "Too far", callback_data: `reason_distance_${taskId}` }]
-          ]
-        }
-      }
-    );
-
-    return bot.answerCallbackQuery(query.id);
-  }
-
-
-
-  // ================= CANCEL REASON =================
-  if (data.startsWith("reason_")) {
-
-    const parts = data.split("_");
-    const reason = parts[1];
-    const taskId = parts[2];
 
     const { data: order } = await supabase
       .from("orders")
@@ -392,39 +338,75 @@ If you cannot complete it:`,
     await supabase
       .from("orders")
       .update({
-        status: "cancelled",
-        cancel_reason: reason,
+        status: "delivered",
         updated_at: new Date()
       })
       .eq("id", taskId);
 
     bot.sendMessage(
       order.user_id,
-      `⚠️ Your task was cancelled.
+      `📦 *Your order has been delivered.*
 
-Reason: ${reason}
-
-Reposting task now.`,
-      { parse_mode: "Markdown" }
-    );
-
-    bot.sendMessage(
-      RUNNER_GROUP_ID,
-      `🔁 *TASK REPOSTED*
-
-🆔 Task ID: \`${taskId}\`
-📌 ${order.task}`,
+Please confirm receipt.`,
       {
         parse_mode: "Markdown",
         reply_markup: {
           inline_keyboard: [
-            [{ text: "✅ Accept Task", callback_data: `accept_${taskId}` }]
+            [{ text: "✅ Confirm Order Received", callback_data: `userconfirm_${taskId}` }]
           ]
         }
       }
     );
 
-    bot.sendMessage(runnerId, "❌ Task cancelled successfully.");
+    bot.sendMessage(runnerId,"Waiting for user confirmation.");
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+
+  // ================= USER CONFIRM =================
+  if (data.startsWith("userconfirm_")) {
+
+    const taskId = data.split("_")[1];
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
+
+    if (!order) return;
+
+    await supabase
+      .from("orders")
+      .update({
+        status: "completed",
+        completed_at: new Date()
+      })
+      .eq("id", taskId);
+
+    bot.sendMessage(order.user_id,"✅ Order confirmed. Thank you!");
+
+    bot.sendMessage(order.runner_id,"🎉 Delivery confirmed by user!");
+
+    return bot.answerCallbackQuery(query.id);
+  }
+
+
+  // ================= CANCEL =================
+  if (data.startsWith("cancel_")) {
+
+    const taskId = data.split("_")[1];
+
+    await supabase
+      .from("orders")
+      .update({
+        status: "cancelled",
+        updated_at: new Date()
+      })
+      .eq("id", taskId);
+
+    bot.sendMessage(query.from.id,"❌ Task cancelled.");
 
     return bot.answerCallbackQuery(query.id);
   }
