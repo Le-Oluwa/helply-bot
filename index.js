@@ -57,13 +57,15 @@ bot.on("message", async (msg) => {
 
   const taskId = Math.random().toString(36).substring(2, 9);
 
-  await supabase.from("orders").insert([{
-    id: taskId,
+  const { error } = await supabase.from("orders").insert([{
+    id: taskId.toString(),
     user_id: userId.toString(),
     task: taskText,
     status: "negotiating",
     created_at: new Date()
   }]);
+
+  if (error) console.log("ORDER INSERT ERROR:", error);
 
   bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
 
@@ -171,17 +173,19 @@ bot.on("callback_query", async (query) => {
       const taskId = data.split("_")[1];
       const price = priceState[userId].price;
 
-      await supabase.from("offers").insert([{
-        order_id: taskId,
+      const { error } = await supabase.from("offers").insert([{
+        order_id: taskId.toString(),
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
+      if (error) console.log("OFFER INSERT ERROR:", error);
+
       const { data: order } = await supabase
         .from("orders")
         .select("*")
-        .eq("id", taskId)
+        .eq("id", taskId.toString())
         .single();
 
       if (order) {
@@ -207,25 +211,27 @@ bot.on("callback_query", async (query) => {
 
     // ================= VIEW OFFERS =================
     if (data.startsWith("view_")) {
-
       const taskId = data.split("_")[1];
 
-      const { data: offers } = await supabase
+      const { data: offers, error } = await supabase
         .from("offers")
         .select("*")
-        .eq("order_id", taskId);
+        .eq("order_id", taskId.toString());
+
+      console.log("TASK ID:", taskId);
+      console.log("OFFERS:", offers);
+      if (error) console.log("FETCH ERROR:", error);
 
       if (!offers || offers.length === 0) {
         return bot.sendMessage(userId, "No offers yet.");
       }
 
-      // sort cheapest first
       offers.sort((a, b) => a.price - b.price);
 
       const buttons = offers.map(o => [
         {
           text: `${o.runner_name} — ₦${o.price}`,
-          callback_data: `select_${taskId}_${o.runner_id}_${o.price}`
+          callback_data: `select_${taskId}_${o.id}_${o.price}`
         }
       ]);
 
@@ -248,15 +254,21 @@ bot.on("callback_query", async (query) => {
       const parts = data.split("_");
 
       const taskId = parts[1];
-      const runnerId = parts[2];
+      const offerId = parts[2];
       const price = parseInt(parts[3]);
 
       const helplyFee = 200;
       const total = price + helplyFee;
 
+      const { data: offer } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("id", offerId)
+        .single();
+
       await supabase.from("orders").update({
         status: "awaiting_payment",
-        runner_id: runnerId,
+        runner_id: offer.runner_id,
         agreed_price: price
       }).eq("id", taskId);
 
@@ -273,11 +285,7 @@ bot.on("callback_query", async (query) => {
 Runner Price: ₦${price}
 Helply Fee: ₦${helplyFee}
 
-💰 Total: ₦${total}
-
-You can pay with:
-• Card 💳
-• Bank Transfer 🏦`,
+💰 Total: ₦${total}`,
         {
           parse_mode: "Markdown",
           reply_markup: {
