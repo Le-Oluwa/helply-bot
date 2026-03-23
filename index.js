@@ -1,6 +1,7 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
+const axios = require("axios");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
@@ -11,15 +12,36 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-// price control state
+// price control
 const priceState = {};
 
-console.log("🚀 Helply Button Negotiation Bot Running");
+console.log("🚀 Helply Bot Running with Payments");
+
+
+// ================= PAYSTACK =================
+async function createPayment(email, amount, taskId) {
+  const res = await axios.post(
+    "https://api.paystack.co/transaction/initialize",
+    {
+      email,
+      amount: amount * 100,
+      metadata: { taskId }
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+
+  return res.data.data;
+}
 
 
 // ================= START =================
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, "Welcome to Helply\n\nSend what you need.");
+  bot.sendMessage(msg.chat.id, "Welcome to Helply 🚀\n\nSend what you need.");
 });
 
 
@@ -103,44 +125,44 @@ bot.on("callback_query", async (query) => {
     }
 
     // ================= PRICE CONTROLS =================
-    if (!priceState[userId]) return;
+    if (priceState[userId]) {
 
-    if (data.startsWith("plus_")) {
-      priceState[userId].price += 100;
-    }
+      if (data.startsWith("plus_")) {
+        priceState[userId].price += 100;
+      }
 
-    if (data.startsWith("minus_")) {
-      priceState[userId].price = Math.max(100, priceState[userId].price - 100);
-    }
+      if (data.startsWith("minus_")) {
+        priceState[userId].price = Math.max(100, priceState[userId].price - 100);
+      }
 
-    if (data.startsWith("plus500_")) {
-      priceState[userId].price += 500;
-    }
+      if (data.startsWith("plus500_")) {
+        priceState[userId].price += 500;
+      }
 
-    if (data.startsWith("minus500_")) {
-      priceState[userId].price = Math.max(100, priceState[userId].price - 500);
-    }
+      if (data.startsWith("minus500_")) {
+        priceState[userId].price = Math.max(100, priceState[userId].price - 500);
+      }
 
-    // ================= UPDATE UI =================
-    if (
-      data.startsWith("plus_") ||
-      data.startsWith("minus_") ||
-      data.startsWith("plus500_") ||
-      data.startsWith("minus500_")
-    ) {
+      if (
+        data.startsWith("plus_") ||
+        data.startsWith("minus_") ||
+        data.startsWith("plus500_") ||
+        data.startsWith("minus500_")
+      ) {
 
-      const current = priceState[userId].price;
+        const current = priceState[userId].price;
 
-      bot.editMessageText(
-        `💰 Set your price: ₦${current}`,
-        {
-          chat_id: query.message.chat.id,
-          message_id: query.message.message_id,
-          reply_markup: query.message.reply_markup
-        }
-      );
+        bot.editMessageText(
+          `💰 Set your price: ₦${current}`,
+          {
+            chat_id: query.message.chat.id,
+            message_id: query.message.message_id,
+            reply_markup: query.message.reply_markup
+          }
+        );
 
-      return bot.answerCallbackQuery(query.id);
+        return bot.answerCallbackQuery(query.id);
+      }
     }
 
     // ================= SUBMIT OFFER =================
@@ -186,14 +208,74 @@ bot.on("callback_query", async (query) => {
       const total = price + helplyFee;
 
       await supabase.from("orders").update({
-        status: "selected",
+        status: "awaiting_payment",
         runner_id: runnerId,
         agreed_price: price
       }).eq("id", taskId);
 
+      const payment = await createPayment(
+        `${userId}@helply.com`,
+        total,
+        taskId
+      );
+
       bot.sendMessage(
         userId,
-        `🧾 Order Summary\n\nRunner: ₦${price}\nFee: ₦${helplyFee}\n\nTotal: ₦${total}`
+        `🧾 *Payment Required*
+
+Runner Price: ₦${price}
+Helply Fee: ₦${helplyFee}
+
+💰 Total: ₦${total}`,
+        {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "💳 Pay Now", url: payment.authorization_url }]
+            ]
+          }
+        }
+      );
+
+      bot.sendMessage(
+        userId,
+        "After payment, click below:",
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "✅ I Have Paid", callback_data: `verify_${taskId}` }]
+            ]
+          }
+        }
+      );
+
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // ================= VERIFY PAYMENT (MVP) =================
+    if (data.startsWith("verify_")) {
+
+      const taskId = data.split("_")[1];
+
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", taskId)
+        .single();
+
+      await supabase.from("orders").update({
+        payment_status: "paid",
+        status: "in_progress"
+      }).eq("id", taskId);
+
+      bot.sendMessage(
+        order.user_id,
+        "✅ Payment confirmed!\n\nYou can now proceed."
+      );
+
+      bot.sendMessage(
+        order.runner_id,
+        "🎉 Payment received! Start the task."
       );
 
       return bot.answerCallbackQuery(query.id);
