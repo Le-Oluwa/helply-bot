@@ -11,44 +11,148 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-const userState = {};
+// price control state
+const priceState = {};
 
-console.log("🚀 Helply Negotiation Bot Running");
+console.log("🚀 Helply Button Negotiation Bot Running");
 
 
 // ================= START =================
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "Welcome to Helply\n\nSend what you need."
-  );
+  bot.sendMessage(msg.chat.id, "Welcome to Helply\n\nSend what you need.");
 });
 
 
-// ================= MAIN MESSAGE HANDLER =================
+// ================= USER REQUEST =================
 bot.on("message", async (msg) => {
 
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
+  if (msg.chat.type !== "private") return;
 
   const userId = msg.chat.id;
+  const taskText = msg.text;
+
+  const taskId = Math.random().toString(36).substring(2, 9);
+
+  await supabase.from("orders").insert([{
+    id: taskId,
+    user_id: userId.toString(),
+    task: taskText,
+    status: "negotiating",
+    created_at: new Date()
+  }]);
+
+  bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
+
+  bot.sendMessage(
+    RUNNER_GROUP_ID,
+    `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${taskText}`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💰 Make Offer", callback_data: `offer_${taskId}` }]
+        ]
+      }
+    }
+  );
+});
+
+
+// ================= CALLBACK =================
+bot.on("callback_query", async (query) => {
+
+  const data = query.data;
+  const userId = query.from.id;
 
   try {
 
-    // ================= RUNNER MAKING OFFER =================
-    if (userState[userId]?.makingOffer) {
+    // ================= START OFFER =================
+    if (data.startsWith("offer_")) {
 
-      const price = parseInt(msg.text);
-      const taskId = userState[userId].taskId;
+      const taskId = data.split("_")[1];
 
-      if (isNaN(price)) {
-        return bot.sendMessage(userId, "Enter a valid price.");
-      }
+      priceState[userId] = {
+        taskId,
+        price: 500
+      };
+
+      bot.sendMessage(
+        userId,
+        `💰 Set your price: ₦500`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "➖100", callback_data: `minus_${taskId}` },
+                { text: "➕100", callback_data: `plus_${taskId}` }
+              ],
+              [
+                { text: "➖500", callback_data: `minus500_${taskId}` },
+                { text: "➕500", callback_data: `plus500_${taskId}` }
+              ],
+              [
+                { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+              ]
+            ]
+          }
+        }
+      );
+
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // ================= PRICE CONTROLS =================
+    if (!priceState[userId]) return;
+
+    if (data.startsWith("plus_")) {
+      priceState[userId].price += 100;
+    }
+
+    if (data.startsWith("minus_")) {
+      priceState[userId].price = Math.max(100, priceState[userId].price - 100);
+    }
+
+    if (data.startsWith("plus500_")) {
+      priceState[userId].price += 500;
+    }
+
+    if (data.startsWith("minus500_")) {
+      priceState[userId].price = Math.max(100, priceState[userId].price - 500);
+    }
+
+    // ================= UPDATE UI =================
+    if (
+      data.startsWith("plus_") ||
+      data.startsWith("minus_") ||
+      data.startsWith("plus500_") ||
+      data.startsWith("minus500_")
+    ) {
+
+      const current = priceState[userId].price;
+
+      bot.editMessageText(
+        `💰 Set your price: ₦${current}`,
+        {
+          chat_id: query.message.chat.id,
+          message_id: query.message.message_id,
+          reply_markup: query.message.reply_markup
+        }
+      );
+
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // ================= SUBMIT OFFER =================
+    if (data.startsWith("submit_")) {
+
+      const taskId = data.split("_")[1];
+      const price = priceState[userId].price;
 
       await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
-        runner_name: msg.from.first_name,
+        runner_name: query.from.first_name,
         price
       }]);
 
@@ -62,156 +166,9 @@ bot.on("message", async (msg) => {
         bot.sendMessage(order.user_id, `💰 New offer: ₦${price}`);
       }
 
-      delete userState[userId];
-      return;
-    }
+      delete priceState[userId];
 
-    // ================= NEGOTIATION CHAT =================
-    if (userState[userId]?.replying) {
-
-      const { taskId, role } = userState[userId];
-      const text = msg.text;
-
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId)
-        .single();
-
-      if (!order) return;
-
-      if (role === "runner") {
-
-        bot.sendMessage(
-          order.user_id,
-          `💬 Runner says:\n${text}`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "Reply", callback_data: `reply_user_${taskId}` }]
-              ]
-            }
-          }
-        );
-
-      } else {
-
-        const { data: offers } = await supabase
-          .from("offers")
-          .select("*")
-          .eq("order_id", taskId);
-
-        if (offers && offers.length > 0) {
-          offers.forEach(o => {
-            bot.sendMessage(
-              o.runner_id,
-              `💬 User says:\n${text}`,
-              {
-                reply_markup: {
-                  inline_keyboard: [
-                    [{ text: "Reply", callback_data: `reply_runner_${taskId}` }]
-                  ]
-                }
-              }
-            );
-          });
-        }
-      }
-
-      delete userState[userId];
-      return;
-    }
-
-    // ================= USER CREATES TASK =================
-    if (msg.chat.type !== "private") return;
-
-    const taskText = msg.text;
-    const taskId = Math.random().toString(36).substring(2, 9);
-
-    await supabase.from("orders").insert([{
-      id: taskId,
-      user_id: userId.toString(),
-      task: taskText,
-      status: "negotiating",
-      created_at: new Date()
-    }]);
-
-    bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
-
-    bot.sendMessage(
-      RUNNER_GROUP_ID,
-      `🚨 NEW REQUEST
-
-🆔 ${taskId}
-📌 ${taskText}`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}` }],
-            [{ text: "💬 Ask Question", callback_data: `reply_runner_${taskId}` }]
-          ]
-        }
-      }
-    );
-
-  } catch (err) {
-    console.log("ERROR:", err.message);
-  }
-
-});
-
-
-// ================= CALLBACK HANDLER =================
-bot.on("callback_query", async (query) => {
-
-  const data = query.data;
-  const userId = query.from.id;
-
-  try {
-
-    // ================= MAKE OFFER =================
-    if (data.startsWith("offer_")) {
-
-      const taskId = data.split("_")[1];
-
-      userState[userId] = {
-        taskId,
-        makingOffer: true
-      };
-
-      bot.sendMessage(userId, "💰 Enter your price:");
-
-      return bot.answerCallbackQuery(query.id);
-    }
-
-    // ================= RUNNER REPLY =================
-    if (data.startsWith("reply_runner_")) {
-
-      const taskId = data.split("_")[2];
-
-      userState[userId] = {
-        replying: true,
-        taskId,
-        role: "runner"
-      };
-
-      bot.sendMessage(userId, "💬 Type message:");
-
-      return bot.answerCallbackQuery(query.id);
-    }
-
-    // ================= USER REPLY =================
-    if (data.startsWith("reply_user_")) {
-
-      const taskId = data.split("_")[2];
-
-      userState[userId] = {
-        replying: true,
-        taskId,
-        role: "user"
-      };
-
-      bot.sendMessage(userId, "💬 Reply:");
+      bot.sendMessage(userId, "✅ Offer submitted!");
 
       return bot.answerCallbackQuery(query.id);
     }
@@ -236,21 +193,15 @@ bot.on("callback_query", async (query) => {
 
       bot.sendMessage(
         userId,
-        `🧾 Order Summary
-
-Runner: ₦${price}
-Fee: ₦${helplyFee}
-
-Total: ₦${total}`
+        `🧾 Order Summary\n\nRunner: ₦${price}\nFee: ₦${helplyFee}\n\nTotal: ₦${total}`
       );
 
       return bot.answerCallbackQuery(query.id);
     }
 
   } catch (err) {
-    console.log("CALLBACK ERROR:", err.message);
+    console.log("ERROR:", err.message);
   }
-
 });
 
 
