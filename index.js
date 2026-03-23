@@ -15,7 +15,7 @@ const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 // price control
 const priceState = {};
 
-console.log("🚀 Helply Bot Running with Payments");
+console.log("🚀 Helply Bot Running (Offers + Payment)");
 
 
 // ================= PAYSTACK =================
@@ -89,7 +89,7 @@ bot.on("callback_query", async (query) => {
 
   try {
 
-    // ================= START OFFER =================
+    // ================= MAKE OFFER =================
     if (data.startsWith("offer_")) {
 
       const taskId = data.split("_")[1];
@@ -124,7 +124,7 @@ bot.on("callback_query", async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
-    // ================= PRICE CONTROLS =================
+    // ================= PRICE CONTROL =================
     if (priceState[userId]) {
 
       if (data.startsWith("plus_")) {
@@ -185,12 +185,59 @@ bot.on("callback_query", async (query) => {
         .single();
 
       if (order) {
-        bot.sendMessage(order.user_id, `💰 New offer: ₦${price}`);
+        bot.sendMessage(
+          order.user_id,
+          `💰 New offer received: ₦${price}`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
+              ]
+            }
+          }
+        );
       }
 
       delete priceState[userId];
 
       bot.sendMessage(userId, "✅ Offer submitted!");
+
+      return bot.answerCallbackQuery(query.id);
+    }
+
+    // ================= VIEW OFFERS =================
+    if (data.startsWith("view_")) {
+
+      const taskId = data.split("_")[1];
+
+      const { data: offers } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("order_id", taskId);
+
+      if (!offers || offers.length === 0) {
+        return bot.sendMessage(userId, "No offers yet.");
+      }
+
+      // sort cheapest first
+      offers.sort((a, b) => a.price - b.price);
+
+      const buttons = offers.map(o => [
+        {
+          text: `${o.runner_name} — ₦${o.price}`,
+          callback_data: `select_${taskId}_${o.runner_id}_${o.price}`
+        }
+      ]);
+
+      bot.sendMessage(
+        userId,
+        "💰 Available Offers:",
+        {
+          reply_markup: {
+            inline_keyboard: buttons
+          }
+        }
+      );
 
       return bot.answerCallbackQuery(query.id);
     }
@@ -226,7 +273,11 @@ bot.on("callback_query", async (query) => {
 Runner Price: ₦${price}
 Helply Fee: ₦${helplyFee}
 
-💰 Total: ₦${total}`,
+💰 Total: ₦${total}
+
+You can pay with:
+• Card 💳
+• Bank Transfer 🏦`,
         {
           parse_mode: "Markdown",
           reply_markup: {
@@ -252,7 +303,7 @@ Helply Fee: ₦${helplyFee}
       return bot.answerCallbackQuery(query.id);
     }
 
-    // ================= VERIFY PAYMENT (MVP) =================
+    // ================= VERIFY PAYMENT =================
     if (data.startsWith("verify_")) {
 
       const taskId = data.split("_")[1];
@@ -270,7 +321,7 @@ Helply Fee: ₦${helplyFee}
 
       bot.sendMessage(
         order.user_id,
-        "✅ Payment confirmed!\n\nYou can now proceed."
+        "✅ Payment confirmed!\n\nRunner will contact you."
       );
 
       bot.sendMessage(
@@ -284,34 +335,6 @@ Helply Fee: ₦${helplyFee}
   } catch (err) {
     console.log("ERROR:", err.message);
   }
-});
-
-
-// ================= VIEW OFFERS =================
-bot.onText(/\/offers (.+)/, async (msg, match) => {
-
-  const taskId = match[1];
-  const userId = msg.chat.id;
-
-  const { data: offers } = await supabase
-    .from("offers")
-    .select("*")
-    .eq("order_id", taskId);
-
-  if (!offers || offers.length === 0) {
-    return bot.sendMessage(userId, "No offers yet.");
-  }
-
-  const buttons = offers.map(o => [
-    {
-      text: `${o.runner_name} — ₦${o.price}`,
-      callback_data: `select_${taskId}_${o.runner_id}_${o.price}`
-    }
-  ]);
-
-  bot.sendMessage(userId, "💰 Choose an offer:", {
-    reply_markup: { inline_keyboard: buttons }
-  });
 });
 
 
