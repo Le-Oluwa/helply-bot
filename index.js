@@ -167,11 +167,20 @@ bot.on("callback_query", async (query) => {
       }
     }
 
-    // ================= SUBMIT OFFER =================
+   // ================= SUBMIT OFFER =================
 if (data.startsWith("submit_")) {
 
   const taskId = data.split("_")[1];
+
+  // 🔥 SAFETY CHECK
+  if (!priceState[userId]) {
+    console.log("❌ No price state for user:", userId);
+    return bot.sendMessage(userId, "⚠️ Session expired. Click 'Make Offer' again.");
+  }
+
   const price = priceState[userId].price;
+
+  console.log("📌 SUBMITTING OFFER:", { taskId, userId, price });
 
   const { data: inserted, error } = await supabase
     .from("offers")
@@ -185,33 +194,44 @@ if (data.startsWith("submit_")) {
 
   console.log("INSERTED OFFER:", inserted);
   console.log("INSERT ERROR:", error);
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId.toString())
-        .single();
 
-      if (order) {
-        bot.sendMessage(
-          order.user_id,
-          `💰 New offer received: ₦${price}`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
-              ]
-            }
-          }
-        );
+  if (error) {
+    return bot.sendMessage(userId, "❌ Failed to submit offer.");
+  }
+
+  // 🔥 FETCH ORDER
+  const { data: order, error: orderError } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", taskId.toString())
+    .single();
+
+  console.log("FETCHED ORDER:", order);
+  console.log("ORDER ERROR:", orderError);
+
+  if (!order) {
+    return bot.sendMessage(userId, "❌ Order not found.");
+  }
+
+  // 🔥 SEND MESSAGE TO USER
+  await bot.sendMessage(
+    order.user_id,
+    `💰 New offer received: ₦${price}`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
+        ]
       }
-
-      delete priceState[userId];
-
-      bot.sendMessage(userId, "✅ Offer submitted!");
-
-      return bot.answerCallbackQuery(query.id);
     }
+  );
 
+  delete priceState[userId];
+
+  bot.sendMessage(userId, "✅ Offer submitted!");
+
+  return bot.answerCallbackQuery(query.id);
+}
     // ================= VIEW OFFERS =================
     if (data.startsWith("view_")) {
       const taskId = data.split("_")[1];
