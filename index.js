@@ -168,20 +168,23 @@ bot.on("callback_query", async (query) => {
     }
 
     // ================= SUBMIT OFFER =================
-    if (data.startsWith("submit_")) {
+if (data.startsWith("submit_")) {
 
-      const taskId = data.split("_")[1];
-      const price = priceState[userId].price;
+  const taskId = data.split("_")[1];
+  const price = priceState[userId].price;
 
-      const { error } = await supabase.from("offers").insert([{
-        order_id: taskId.toString(),
-        runner_id: userId.toString(),
-        runner_name: query.from.first_name,
-        price
-      }]);
+  const { data: inserted, error } = await supabase
+    .from("offers")
+    .insert([{
+      order_id: taskId.toString(),
+      runner_id: userId.toString(),
+      runner_name: query.from.first_name,
+      price
+    }])
+    .select();
 
-      if (error) console.log("OFFER INSERT ERROR:", error);
-
+  console.log("INSERTED OFFER:", inserted);
+  console.log("INSERT ERROR:", error);
       const { data: order } = await supabase
         .from("orders")
         .select("*")
