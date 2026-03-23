@@ -58,15 +58,16 @@ bot.on("message", async (msg) => {
 
   console.log("✅ CREATED ORDER ID:", taskId);
 
-  const { error } = await supabase.from("orders").insert([{
-    id: taskId,
-    user_id: userId.toString(),
-    task: taskText,
-    status: "negotiating",
-    created_at: new Date()
-  }]);
+  const { data, error } = await supabase.from("orders").insert([{
+  id: taskId,
+  user_id: userId.toString(),
+  task: taskText,
+  status: "negotiating",
+  created_at: new Date()
+}]).select();
 
-  if (error) console.log("ORDER INSERT ERROR:", error);
+console.log("ORDER INSERT DATA:", data);
+console.log("ORDER INSERT ERROR:", error);
 
   bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
 
