@@ -13,7 +13,7 @@ const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 // 🔥 STATE
 const priceState = {};
-const offerMessages = {}; // 🔥 NEW (for live updating offers)
+const offerMessages = {};
 
 console.log("🚀 Helply Running");
 
@@ -91,7 +91,6 @@ bot.on("callback_query", async (query) => {
       });
 
       priceState[userId].messageId = sent.message_id;
-
       return;
     }
 
@@ -107,8 +106,11 @@ bot.on("callback_query", async (query) => {
 
       const taskId = data.split("_")[1];
 
-      if (!priceState[userId] || priceState[userId].taskId !== taskId) return;
+      if (!priceState[userId] || priceState[userId].taskId !== taskId) {
+        return;
+      }
 
+      // 🔥 ONLY UPDATE PRICE
       if (data.startsWith("plus_")) priceState[userId].price += 100;
       if (data.startsWith("minus_")) priceState[userId].price -= 100;
       if (data.startsWith("plus500_")) priceState[userId].price += 500;
@@ -139,7 +141,7 @@ bot.on("callback_query", async (query) => {
         }
       );
 
-      return;
+      return; // 🔥 IMPORTANT (prevents overlap)
     }
 
 
@@ -170,7 +172,7 @@ bot.on("callback_query", async (query) => {
 
       if (!order) return;
 
-      // 🔥 FETCH ALL OFFERS
+      // 🔥 FETCH ALL OFFERS (ONLY HERE)
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -188,7 +190,6 @@ bot.on("callback_query", async (query) => {
 
         const chatId = Number(order.user_id);
 
-        // 🔥 LIVE UPDATE LOGIC
         if (!offerMessages[taskId]) {
           const sent = await bot.sendMessage(
             chatId,
