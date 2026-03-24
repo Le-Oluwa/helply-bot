@@ -1,7 +1,6 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
-const axios = require("axios");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
@@ -12,15 +11,14 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-// 🔥 NEW STATE SYSTEM (per runner per task)
+// 🔥 STATE (per runner per task)
 const priceState = {};
 
-console.log("🚀 Helply Bot Running");
+console.log("🚀 Helply Running");
 
 
 // ================= USER REQUEST =================
 bot.on("message", async (msg) => {
-
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
@@ -38,7 +36,7 @@ bot.on("message", async (msg) => {
     created_at: new Date()
   }]);
 
-  bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
+  bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
 
   bot.sendMessage(
     RUNNER_GROUP_ID,
@@ -56,7 +54,6 @@ bot.on("message", async (msg) => {
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (query) => {
-
   const data = query.data;
   const userId = query.from.id;
 
@@ -64,7 +61,6 @@ bot.on("callback_query", async (query) => {
 
     // ================= MAKE OFFER =================
     if (data.startsWith("offer_")) {
-
       const taskId = data.split("_")[1];
       const key = `${userId}_${taskId}`;
 
@@ -111,7 +107,6 @@ bot.on("callback_query", async (query) => {
         data.startsWith("plus500_") ||
         data.startsWith("minus500_")
       ) {
-
         const current = priceState[key].price;
 
         bot.editMessageText(`💰 Set your price: ₦${current}`, {
@@ -136,15 +131,21 @@ bot.on("callback_query", async (query) => {
 
       const price = priceState[key].price;
 
-      await supabase.from("offers").insert([{
+      const { error } = await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
-        price,
-        status: "pending"
+        price
       }]);
 
-      // 🔥 notify user
+      if (error) {
+        console.log(error);
+        return bot.sendMessage(userId, "❌ Failed to submit offer.");
+      }
+
+      console.log("✅ OFFER SAVED FOR:", taskId);
+
+      // 🔥 notify user with ONE button
       const { data: order } = await supabase
         .from("orders")
         .select("user_id")
@@ -154,7 +155,7 @@ bot.on("callback_query", async (query) => {
       if (order) {
         bot.sendMessage(
           order.user_id,
-          `💰 New offer received: ₦${price}`,
+          `💰 New offer received!`,
           {
             reply_markup: {
               inline_keyboard: [
@@ -177,14 +178,15 @@ bot.on("callback_query", async (query) => {
 
       const taskId = data.split("_")[1];
 
-      const { data: offers } = await supabase
+      const { data: offers, error } = await supabase
         .from("offers")
         .select("*")
-        .eq("order_id", taskId)
-        .eq("status", "pending");
+        .eq("order_id", taskId);
+
+      console.log("OFFERS FOUND:", offers);
 
       if (!offers || offers.length === 0) {
-        return bot.sendMessage(userId, "No offers yet.");
+        return bot.sendMessage(userId, "❌ No offers yet.");
       }
 
       offers.sort((a, b) => a.price - b.price);
@@ -198,10 +200,12 @@ bot.on("callback_query", async (query) => {
 
       bot.sendMessage(
         userId,
-        "💰 *Choose the best offer:*",
+        "💰 *Available Offers:*",
         {
           parse_mode: "Markdown",
-          reply_markup: { inline_keyboard: buttons }
+          reply_markup: {
+            inline_keyboard: buttons
+          }
         }
       );
 
@@ -217,23 +221,17 @@ bot.on("callback_query", async (query) => {
       const offerId = parts[2];
       const price = parseInt(parts[3]);
 
-      // ✅ accept selected
-      await supabase
-        .from("offers")
-        .update({ status: "accepted" })
-        .eq("id", offerId);
-
-      // ❌ reject others
-      await supabase
-        .from("offers")
-        .update({ status: "rejected" })
-        .eq("order_id", taskId)
-        .neq("id", offerId);
-
       await supabase.from("orders").update({
         status: "awaiting_payment",
         agreed_price: price
       }).eq("id", taskId);
+
+      // 🔥 delete other offers
+      await supabase
+        .from("offers")
+        .delete()
+        .eq("order_id", taskId)
+        .neq("id", offerId);
 
       bot.sendMessage(userId, "✅ Offer selected!");
 
