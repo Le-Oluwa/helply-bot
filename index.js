@@ -27,15 +27,23 @@ bot.on("message", async (msg) => {
   const userId = msg.chat.id;
   const taskText = msg.text;
 
-  const taskId = Math.random().toString(36).substring(2, 9);
+  // 🔥 FORCE STRING ID
+  const taskId = String(Math.random().toString(36).substring(2, 9));
 
-  await supabase.from("orders").insert([{
+  const { error } = await supabase.from("orders").insert([{
     id: taskId,
     user_id: userId.toString(),
     task: taskText,
     status: "negotiating",
     created_at: new Date()
   }]);
+
+  if (error) {
+    console.log("❌ ORDER INSERT ERROR:", error);
+    return;
+  }
+
+  console.log("✅ ORDER CREATED:", taskId);
 
   bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
 
@@ -117,15 +125,12 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].price = Math.max(100, priceState[userId].price);
 
-      // delete old message
-      try {
-        await bot.deleteMessage(userId, query.message.message_id);
-      } catch (e) {}
-
-      const sent = await bot.sendMessage(
-        userId,
+      // 🔥 SAFE EDIT (NO DELETE)
+      await bot.editMessageText(
         `💰 Set your price: ₦${priceState[userId].price}`,
         {
+          chat_id: userId,
+          message_id: query.message.message_id,
           reply_markup: {
             inline_keyboard: [
               [
@@ -144,7 +149,6 @@ bot.on("callback_query", async (query) => {
         }
       );
 
-      priceState[userId].messageId = sent.message_id;
       return;
     }
 
@@ -163,28 +167,32 @@ bot.on("callback_query", async (query) => {
 
       const { error } = await supabase.from("offers").insert([{
         id: uuidv4(),
-        order_id: String(taskId),
+        order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
       if (error) {
-        console.log("❌ SUPABASE ERROR:", error);
+        console.log("❌ OFFER INSERT ERROR:", error);
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
       console.log("✅ OFFER SAVED");
 
+      // 🔥 DEBUG: CHECK ORDERS
+      const { data: allOrders } = await supabase.from("orders").select("*");
+      console.log("📦 ALL ORDERS:", allOrders);
+
       // 🔥 FETCH ORDER
       const { data: order } = await supabase
         .from("orders")
         .select("*")
-        .eq("id", String(taskId))
+        .eq("id", taskId)
         .single();
 
       if (!order) {
-        console.log("❌ ORDER NOT FOUND");
+        console.log("❌ ORDER NOT FOUND FOR:", taskId);
         return;
       }
 
@@ -192,7 +200,7 @@ bot.on("callback_query", async (query) => {
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
-        .eq("order_id", String(taskId));
+        .eq("order_id", taskId);
 
       console.log("📦 OFFERS:", offers);
 
@@ -200,8 +208,6 @@ bot.on("callback_query", async (query) => {
       console.log("📤 SENDING TO:", chatId);
 
       if (offers && offers.length > 0) {
-        offers.sort((a, b) => a.price - b.price);
-
         const buttons = offers.map(o => [
           {
             text: `👤 ${o.runner_name} — ₦${o.price}`,
@@ -219,32 +225,6 @@ bot.on("callback_query", async (query) => {
       delete priceState[userId];
 
       bot.sendMessage(userId, "✅ Offer submitted!");
-      return;
-    }
-
-
-    // ================= SELECT OFFER =================
-    if (data.startsWith("select_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const parts = data.split("_");
-
-      const taskId = parts[1];
-      const offerId = parts[2];
-      const price = parseInt(parts[3]);
-
-      await supabase.from("orders").update({
-        status: "awaiting_payment",
-        agreed_price: price
-      }).eq("id", taskId);
-
-      await supabase
-        .from("offers")
-        .delete()
-        .eq("order_id", taskId)
-        .neq("id", offerId);
-
-      bot.sendMessage(userId, "✅ Offer selected!");
       return;
     }
 
