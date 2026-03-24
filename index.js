@@ -58,19 +58,16 @@ bot.on("message", async (msg) => {
 
   console.log("✅ CREATED ORDER ID:", taskId);
 
-  const { data: orderInsert, error: orderError } = await supabase
-  .from("orders")
-  .insert([{
+  const { error } = await supabase.from("orders").insert([{
     id: taskId,
     user_id: userId.toString(),
     task: taskText,
     status: "negotiating",
     created_at: new Date()
-  }])
-  .select();
+  }]);
 
-console.log("🟢 ORDER INSERT RESULT:", orderInsert);
-console.log("🔴 ORDER INSERT ERROR:", orderError);
+  if (error) console.log("ORDER INSERT ERROR:", error);
+
   bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
 
   bot.sendMessage(
@@ -96,44 +93,39 @@ bot.on("callback_query", async (query) => {
   try {
 
     // ================= MAKE OFFER =================
-   if (data.startsWith("offer_")) {
+    if (data.startsWith("offer_")) {
 
-  const taskId = data.split("_")[1];
+      const taskId = data.split("_")[1];
 
-  // 🔥 PREVENT OVERWRITING
-  if (priceState[userId]) {
-    return bot.sendMessage(userId, "⚠️ Finish your current offer first.");
-  }
-
-  priceState[userId] = {
-    taskId: taskId.toString(),
-    price: 500
-  };
-
-  bot.sendMessage(
-    userId,
-    `💰 Set your price: ₦500`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "➖100", callback_data: `minus_${taskId}` },
-            { text: "➕100", callback_data: `plus_${taskId}` }
-          ],
-          [
-            { text: "➖500", callback_data: `minus500_${taskId}` },
-            { text: "➕500", callback_data: `plus500_${taskId}` }
-          ],
-          [
-            { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
-          ]
-        ]
+      if (priceState[userId]) {
+        return bot.sendMessage(userId, "⚠️ Finish your current offer first.");
       }
-    }
-  );
 
-  return bot.answerCallbackQuery(query.id);
-}
+      priceState[userId] = {
+        taskId: taskId.toString(),
+        price: 500
+      };
+
+      bot.sendMessage(userId, `💰 Set your price: ₦500`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "➖100", callback_data: `minus_${taskId}` },
+              { text: "➕100", callback_data: `plus_${taskId}` }
+            ],
+            [
+              { text: "➖500", callback_data: `minus500_${taskId}` },
+              { text: "➕500", callback_data: `plus500_${taskId}` }
+            ],
+            [
+              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+            ]
+          ]
+        }
+      });
+
+      return bot.answerCallbackQuery(query.id);
+    }
 
     // ================= PRICE CONTROL =================
     if (priceState[userId]) {
@@ -160,27 +152,18 @@ bot.on("callback_query", async (query) => {
         return bot.answerCallbackQuery(query.id);
       }
     }
-   // ================= SUBMIT OFFER =================
-if (data.startsWith("submit_")) {
 
-  if (!priceState[userId]) {
-    return bot.sendMessage(userId, "⚠️ Session expired.");
-  }
+    // ================= SUBMIT OFFER =================
+    if (data.startsWith("submit_")) {
 
-  const taskId = priceState[userId].taskId;
-  const price = priceState[userId].price;
-  if (!taskId) {
-    return bot.sendMessage(userId, "❌ Invalid task. Start again.");
-  }
+      if (!priceState[userId]) {
+        return bot.sendMessage(userId, "⚠️ Session expired.");
+      }
 
-  console.log("🟡 STATE TASK ID:", taskId);
+      const taskId = priceState[userId].taskId;
+      const price = priceState[userId].price;
 
-  // 🔥 CHECK DB DIRECTLY
-  const { data: allOrders } = await supabase
-    .from("orders")
-    .select("*");
-
-  console.log("📦 ALL ORDERS:", allOrders);
+      console.log("📌 SUBMITTING OFFER:", { taskId, price });
 
       const { data: inserted, error } = await supabase
         .from("offers")
@@ -199,40 +182,33 @@ if (data.startsWith("submit_")) {
         return bot.sendMessage(userId, "❌ Failed to submit offer.");
       }
 
-      const { data: order, error: orderError } = await supabase
+      // 🔥 NO ORDER FETCH — JUST USE taskId
+      await bot.sendMessage(
+        userId,
+        `💰 Offer submitted: ₦${price}`,
+      );
+
+      // 🔥 SEND TO USER WHO CREATED REQUEST
+      const { data: orderOwner } = await supabase
         .from("orders")
-        .select("*")
+        .select("user_id")
         .eq("id", taskId)
         .maybeSingle();
 
-      console.log("FETCHED ORDER:", order);
-      console.log("ORDER ERROR:", orderError);
-
-      if (!order) {
-        const { data: allOrders } = await supabase
-          .from("orders")
-          .select("*");
-
-        console.log("ALL ORDERS IN DB:", allOrders);
-
-        return bot.sendMessage(userId, "❌ Order not found.");
+      if (orderOwner) {
+        await bot.sendMessage(
+          orderOwner.user_id,
+          `💰 New offer received: ₦${price}`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
+              ]
+            }
+          }
+        );
       }
 
-      await bot.sendMessage(
-        order.user_id,
-        `💰 New offer received: ₦${price}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
-            ]
-          }
-        }
-      );
-
-      delete priceState[userId];
-
-      bot.sendMessage(userId, "✅ Offer submitted!");
       delete priceState[userId];
 
       return bot.answerCallbackQuery(query.id);
@@ -246,9 +222,6 @@ if (data.startsWith("submit_")) {
         .from("offers")
         .select("*")
         .eq("order_id", taskId);
-
-      console.log("VIEW TASK:", taskId);
-      console.log("OFFERS:", offers);
 
       if (!offers || offers.length === 0) {
         return bot.sendMessage(userId, "No offers yet.");
@@ -304,13 +277,7 @@ if (data.startsWith("submit_")) {
         taskId
       );
 
-      bot.sendMessage(userId, `🧾 *Payment Required*
-
-Runner Price: ₦${price}
-Helply Fee: ₦${helplyFee}
-
-💰 Total: ₦${total}`, {
-        parse_mode: "Markdown",
+      bot.sendMessage(userId, `🧾 Payment Required\n\n₦${total}`, {
         reply_markup: {
           inline_keyboard: [
             [{ text: "💳 Pay Now", url: payment.authorization_url }]
@@ -318,44 +285,10 @@ Helply Fee: ₦${helplyFee}
         }
       });
 
-      bot.sendMessage(userId, "After payment, click below:", {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ I Have Paid", callback_data: `verify_${taskId}` }]
-          ]
-        }
-      });
-
-      return bot.answerCallbackQuery(query.id);
-    }
-
-    // ================= VERIFY PAYMENT =================
-    if (data.startsWith("verify_")) {
-
-      const taskId = data.split("_")[1];
-
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId)
-        .maybeSingle();
-
-      await supabase.from("orders").update({
-        payment_status: "paid",
-        status: "in_progress"
-      }).eq("id", taskId);
-
-      bot.sendMessage(order.user_id, "✅ Payment confirmed!");
-      bot.sendMessage(order.runner_id, "🎉 Payment received!");
-
       return bot.answerCallbackQuery(query.id);
     }
 
   } catch (err) {
     console.log("ERROR:", err.message);
   }
-});
-
-bot.on("polling_error", (err) => {
-  console.log("Polling Error:", err.message);
 });
