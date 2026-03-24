@@ -11,6 +11,7 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
+// 🔥 STATE (per runner per task)
 const priceState = {};
 
 console.log("🚀 Helply Running");
@@ -104,9 +105,9 @@ bot.on("callback_query", async (query) => {
       if (data.startsWith("plus500_")) priceState[key].price += 500;
       if (data.startsWith("minus500_")) priceState[key].price -= 500;
 
-      const current = Math.max(100, priceState[key].price);
+      priceState[key].price = Math.max(100, priceState[key].price);
 
-      bot.editMessageText(`💰 Set your price: ₦${current}`, {
+      bot.editMessageText(`💰 Set your price: ₦${priceState[key].price}`, {
         chat_id: query.message.chat.id,
         message_id: query.message.message_id,
         reply_markup: query.message.reply_markup
@@ -119,14 +120,17 @@ bot.on("callback_query", async (query) => {
     // ================= SUBMIT OFFER =================
     if (data.startsWith("submit_")) {
 
-      const taskId = data.split("_")[1];
-      const key = `${userId}_${taskId}`;
+      // 🔥 GET STATE SAFELY (no mismatch)
+      const stateEntry = Object.entries(priceState).find(([k]) =>
+        k.startsWith(userId + "_")
+      );
 
-      if (!priceState[key]) {
+      if (!stateEntry) {
         return bot.sendMessage(userId, "⚠️ Session expired.");
       }
 
-      const price = priceState[key].price;
+      const key = stateEntry[0];
+      const { taskId, price } = stateEntry[1];
 
       await supabase.from("offers").insert([{
         order_id: taskId,
@@ -137,25 +141,23 @@ bot.on("callback_query", async (query) => {
 
       console.log("✅ OFFER SAVED FOR:", taskId);
 
-      // 🔥 FIXED ORDER FETCH
+      // 🔥 FETCH ORDER (SAFE)
       const { data: orders } = await supabase
         .from("orders")
         .select("*")
         .eq("id", taskId);
 
-      console.log("📦 ORDER FETCH:", orders);
-
       if (!orders || orders.length === 0) {
-        console.log("❌ Order not found for notify");
+        console.log("❌ Order not found");
         return;
       }
 
       const order = orders[0];
 
-      // 🔥 SEND BUTTON TO USER
+      // 🔥 SEND VIEW BUTTON
       bot.sendMessage(
         order.user_id,
-        `💰 New offer received!`,
+        "💰 New offer received!",
         {
           reply_markup: {
             inline_keyboard: [
@@ -200,9 +202,7 @@ bot.on("callback_query", async (query) => {
         userId,
         `💰 Available Offers (${offers.length})`,
         {
-          reply_markup: {
-            inline_keyboard: buttons
-          }
+          reply_markup: { inline_keyboard: buttons }
         }
       );
 
