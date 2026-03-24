@@ -18,21 +18,95 @@ const offerMessages = {};
 console.log("🚀 Helply Running");
 
 
-// ================= USER REQUEST =================
+// ================= MESSAGE HANDLER =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
-  if (msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
   const userId = msg.chat.id;
-  const taskText = msg.text;
+  const text = msg.text.trim().toLowerCase();
 
+  // 🔥 SUBMIT COMMAND (MUST BE FIRST)
+  if (text === "submit") {
+
+    if (!priceState[userId]) {
+      return bot.sendMessage(userId, "⚠️ No active offer.");
+    }
+
+    const { taskId, price } = priceState[userId];
+
+    const { error } = await supabase.from("offers").insert([{
+      id: uuidv4(),
+      order_id: taskId,
+      runner_id: userId.toString(),
+      runner_name: msg.from.first_name,
+      price
+    }]);
+
+    if (error) {
+      console.log("❌ SUPABASE ERROR:", error);
+      return bot.sendMessage(userId, "❌ Failed to save offer.");
+    }
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", taskId)
+      .single();
+
+    const { data: offers } = await supabase
+      .from("offers")
+      .select("*")
+      .eq("order_id", taskId);
+
+    if (offers && offers.length > 0) {
+      offers.sort((a, b) => a.price - b.price);
+
+      const buttons = offers.map(o => [
+        {
+          text: `👤 ${o.runner_name} — ₦${o.price}`,
+          callback_data: `select_${taskId}_${o.id}_${o.price}`
+        }
+      ]);
+
+      const chatId = Number(order.user_id);
+
+      if (!offerMessages[taskId]) {
+        const sent = await bot.sendMessage(
+          chatId,
+          `💰 Available Offers (${offers.length})`,
+          { reply_markup: { inline_keyboard: buttons } }
+        );
+
+        offerMessages[taskId] = sent.message_id;
+      } else {
+        await bot.editMessageText(
+          `💰 Available Offers (${offers.length})`,
+          {
+            chat_id: chatId,
+            message_id: offerMessages[taskId],
+            reply_markup: { inline_keyboard: buttons }
+          }
+        );
+      }
+    }
+
+    delete priceState[userId];
+
+    return bot.sendMessage(userId, "✅ Offer submitted!");
+  }
+
+  // ❌ IGNORE COMMANDS AFTER SUBMIT CHECK
+  if (msg.text.startsWith("/")) return;
+
+
+  // ================= NEW REQUEST =================
   const taskId = Math.random().toString(36).substring(2, 9);
 
   await supabase.from("orders").insert([{
     id: taskId,
     user_id: userId.toString(),
-    task: taskText,
+    task: msg.text,
     status: "negotiating",
     created_at: new Date()
   }]);
@@ -41,7 +115,7 @@ bot.on("message", async (msg) => {
 
   bot.sendMessage(
     RUNNER_GROUP_ID,
-    `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${taskText}`,
+    `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${msg.text}`,
     {
       reply_markup: {
         inline_keyboard: [
@@ -72,7 +146,6 @@ bot.on("callback_query", async (query) => {
         messageId: null
       };
 
-      // 🔥 PRICE MESSAGE (NO SUBMIT BUTTON HERE)
       const sent = await bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
           inline_keyboard: [
@@ -90,13 +163,8 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].messageId = sent.message_id;
 
-      // 🔥 SEPARATE SUBMIT BUTTON (VERY IMPORTANT)
-      await bot.sendMessage(userId, "Ready to submit?", {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Submit Offer", callback_data: `submit_${taskId}` }]
-          ]
-        }
+      bot.sendMessage(userId, "👉 Type *submit* to send your offer", {
+        parse_mode: "Markdown"
       });
 
       return;
@@ -143,83 +211,6 @@ bot.on("callback_query", async (query) => {
         }
       );
 
-      return;
-    }
-
-
-    // ================= SUBMIT OFFER =================
-    if (data.startsWith("submit_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const taskId = data.split("_")[1];
-
-      if (!priceState[userId] || priceState[userId].taskId !== taskId) {
-        return bot.sendMessage(userId, "⚠️ Session expired.");
-      }
-
-      const price = priceState[userId].price;
-
-      const { error } = await supabase.from("offers").insert([{
-        id: uuidv4(),
-        order_id: taskId,
-        runner_id: userId.toString(),
-        runner_name: query.from.first_name,
-        price
-      }]);
-
-      if (error) {
-        console.log("❌ SUPABASE ERROR:", error);
-        return bot.sendMessage(userId, "❌ Failed to save offer.");
-      }
-
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId)
-        .single();
-
-      if (!order) return;
-
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", taskId);
-
-      if (offers && offers.length > 0) {
-        offers.sort((a, b) => a.price - b.price);
-
-        const buttons = offers.map(o => [
-          {
-            text: `👤 ${o.runner_name} — ₦${o.price}`,
-            callback_data: `select_${taskId}_${o.id}_${o.price}`
-          }
-        ]);
-
-        const chatId = Number(order.user_id);
-
-        if (!offerMessages[taskId]) {
-          const sent = await bot.sendMessage(
-            chatId,
-            `💰 Available Offers (${offers.length})`,
-            { reply_markup: { inline_keyboard: buttons } }
-          );
-
-          offerMessages[taskId] = sent.message_id;
-        } else {
-          await bot.editMessageText(
-            `💰 Available Offers (${offers.length})`,
-            {
-              chat_id: chatId,
-              message_id: offerMessages[taskId],
-              reply_markup: { inline_keyboard: buttons }
-            }
-          );
-        }
-      }
-
-      delete priceState[userId];
-
-      bot.sendMessage(userId, "✅ Offer submitted!");
       return;
     }
 
