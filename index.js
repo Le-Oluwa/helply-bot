@@ -68,8 +68,6 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId][taskId] = { price: 500 };
 
-      console.log("🧠 STATE CREATED:", priceState[userId]);
-
       bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
           inline_keyboard: [
@@ -101,10 +99,7 @@ bot.on("callback_query", async (query) => {
     ) {
       const taskId = data.split("_")[1];
 
-      if (!priceState[userId] || !priceState[userId][taskId]) {
-        console.log("❌ STATE MISSING");
-        return;
-      }
+      if (!priceState[userId] || !priceState[userId][taskId]) return;
 
       if (data.startsWith("plus_")) priceState[userId][taskId].price += 100;
       if (data.startsWith("minus_")) priceState[userId][taskId].price -= 100;
@@ -113,10 +108,23 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId][taskId].price = Math.max(100, priceState[userId][taskId].price);
 
-      bot.editMessageText(`💰 Set your price: ₦${priceState[userId][taskId].price}`, {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        reply_markup: query.message.reply_markup
+      // 🔥 FIXED HERE (NO MORE editMessageText)
+      bot.sendMessage(userId, `💰 Updated price: ₦${priceState[userId][taskId].price}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "➖100", callback_data: `minus_${taskId}` },
+              { text: "➕100", callback_data: `plus_${taskId}` }
+            ],
+            [
+              { text: "➖500", callback_data: `minus500_${taskId}` },
+              { text: "➕500", callback_data: `plus500_${taskId}` }
+            ],
+            [
+              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+            ]
+          ]
+        }
       });
 
       return bot.answerCallbackQuery(query.id);
@@ -127,39 +135,25 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       const taskId = data.split("_")[1];
 
-      console.log("🟡 SUBMIT CLICKED:", taskId);
-      console.log("🧠 CURRENT STATE:", priceState[userId]);
-
       if (!priceState[userId] || !priceState[userId][taskId]) {
-        console.log("❌ SESSION EXPIRED");
-        return bot.sendMessage(userId, "⚠️ Session expired. Click Make Offer again.");
+        return bot.sendMessage(userId, "⚠️ Session expired.");
       }
 
       const price = priceState[userId][taskId].price;
 
-      const { error } = await supabase.from("offers").insert([{
+      await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
-      if (error) {
-        console.log("❌ INSERT ERROR:", error);
-        return bot.sendMessage(userId, "❌ Failed to submit offer.");
-      }
-
-      console.log("✅ OFFER SAVED");
-
       const { data: orders } = await supabase
         .from("orders")
         .select("*")
         .eq("id", taskId);
 
-      if (!orders || orders.length === 0) {
-        console.log("❌ ORDER NOT FOUND");
-        return;
-      }
+      if (!orders || orders.length === 0) return;
 
       const order = orders[0];
 
