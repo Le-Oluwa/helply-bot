@@ -96,35 +96,44 @@ bot.on("callback_query", async (query) => {
   try {
 
     // ================= MAKE OFFER =================
-    if (data.startsWith("offer_")) {
+   if (data.startsWith("offer_")) {
 
-      const taskId = data.split("_")[1];
+  const taskId = data.split("_")[1];
 
-      priceState[userId] = {
-        taskId,
-        price: 500
-      };
+  // 🔥 PREVENT OVERWRITING
+  if (priceState[userId]) {
+    return bot.sendMessage(userId, "⚠️ Finish your current offer first.");
+  }
 
-      bot.sendMessage(userId, `💰 Set your price: ₦500`, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "➖100", callback_data: `minus_${taskId}` },
-              { text: "➕100", callback_data: `plus_${taskId}` }
-            ],
-            [
-              { text: "➖500", callback_data: `minus500_${taskId}` },
-              { text: "➕500", callback_data: `plus500_${taskId}` }
-            ],
-            [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
-            ]
+  priceState[userId] = {
+    taskId: taskId.toString(),
+    price: 500
+  };
+
+  bot.sendMessage(
+    userId,
+    `💰 Set your price: ₦500`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "➖100", callback_data: `minus_${taskId}` },
+            { text: "➕100", callback_data: `plus_${taskId}` }
+          ],
+          [
+            { text: "➖500", callback_data: `minus500_${taskId}` },
+            { text: "➕500", callback_data: `plus500_${taskId}` }
+          ],
+          [
+            { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
           ]
-        }
-      });
-
-      return bot.answerCallbackQuery(query.id);
+        ]
+      }
     }
+  );
+
+  return bot.answerCallbackQuery(query.id);
+}
 
     // ================= PRICE CONTROL =================
     if (priceState[userId]) {
@@ -160,6 +169,9 @@ if (data.startsWith("submit_")) {
 
   const taskId = priceState[userId].taskId;
   const price = priceState[userId].price;
+  if (!taskId) {
+    return bot.sendMessage(userId, "❌ Invalid task. Start again.");
+  }
 
   console.log("🟡 STATE TASK ID:", taskId);
 
@@ -221,6 +233,7 @@ if (data.startsWith("submit_")) {
       delete priceState[userId];
 
       bot.sendMessage(userId, "✅ Offer submitted!");
+      delete priceState[userId];
 
       return bot.answerCallbackQuery(query.id);
     }
