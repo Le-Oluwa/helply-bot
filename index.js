@@ -56,8 +56,6 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
   const userId = query.from.id;
 
-  console.log("📩 CALLBACK:", data);
-
   try {
 
     // ================= MAKE OFFER =================
@@ -66,9 +64,10 @@ bot.on("callback_query", async (query) => {
 
       const taskId = data.split("_")[1];
 
-      if (!priceState[userId]) priceState[userId] = {};
-
-      priceState[userId][taskId] = { price: 500 };
+      priceState[userId] = {
+        taskId,
+        price: 500
+      };
 
       bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
@@ -101,40 +100,16 @@ bot.on("callback_query", async (query) => {
     ) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = data.split("_")[1];
+      if (!priceState[userId]) return;
 
-      if (!priceState[userId] || !priceState[userId][taskId]) {
-        return bot.sendMessage(userId, "⚠️ Session expired.");
-      }
+      if (data.startsWith("plus_")) priceState[userId].price += 100;
+      if (data.startsWith("minus_")) priceState[userId].price -= 100;
+      if (data.startsWith("plus500_")) priceState[userId].price += 500;
+      if (data.startsWith("minus500_")) priceState[userId].price -= 500;
 
-      if (data.startsWith("plus_")) priceState[userId][taskId].price += 100;
-      if (data.startsWith("minus_")) priceState[userId][taskId].price -= 100;
-      if (data.startsWith("plus500_")) priceState[userId][taskId].price += 500;
-      if (data.startsWith("minus500_")) priceState[userId][taskId].price -= 500;
+      priceState[userId].price = Math.max(100, priceState[userId].price);
 
-      priceState[userId][taskId].price = Math.max(100, priceState[userId][taskId].price);
-
-      bot.sendMessage(
-        userId,
-        `💰 Updated price: ₦${priceState[userId][taskId].price}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "➖100", callback_data: `minus_${taskId}` },
-                { text: "➕100", callback_data: `plus_${taskId}` }
-              ],
-              [
-                { text: "➖500", callback_data: `minus500_${taskId}` },
-                { text: "➕500", callback_data: `plus500_${taskId}` }
-              ],
-              [
-                { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
-              ]
-            ]
-          }
-        }
-      );
+      bot.sendMessage(userId, `💰 Price: ₦${priceState[userId].price}`);
 
       return;
     }
@@ -144,53 +119,44 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = data.split("_")[1];
-
-      if (!priceState[userId] || !priceState[userId][taskId]) {
+      if (!priceState[userId]) {
         return bot.sendMessage(userId, "⚠️ Session expired.");
       }
 
-      const price = priceState[userId][taskId].price;
+      const { taskId, price } = priceState[userId];
 
-      // ✅ FIXED INSERT (NO ID NEEDED)
-      const { error } = await supabase.from("offers").insert([{
+      await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
-      if (error) {
-        console.log("❌ INSERT ERROR:", error);
-        return bot.sendMessage(userId, `❌ ${error.message}`);
-      }
-
-      const { data: orders, error: orderError } = await supabase
+      const { data: order } = await supabase
         .from("orders")
         .select("*")
-        .eq("id", taskId);
+        .eq("id", taskId)
+        .single();
 
-      if (orderError || !orders || orders.length === 0) {
-        return bot.sendMessage(userId, "❌ Order not found.");
+      if (order) {
+        bot.sendMessage(
+          Number(order.user_id),
+          "💰 New offer received!",
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
+              ]
+            }
+          }
+        );
       }
 
-      const order = orders[0];
+      delete priceState[userId];
 
-      await bot.sendMessage(
-        Number(order.user_id),
-        "💰 New offer received!",
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
-            ]
-          }
-        }
-      );
+      bot.sendMessage(userId, "✅ Offer submitted!");
 
-      delete priceState[userId][taskId];
-
-      return bot.sendMessage(userId, "✅ Offer submitted!");
+      return;
     }
 
 
