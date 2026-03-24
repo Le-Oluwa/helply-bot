@@ -11,7 +11,6 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-// 🔥 NEW STATE STRUCTURE
 const priceState = {};
 
 console.log("🚀 Helply Running");
@@ -57,6 +56,8 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
   const userId = query.from.id;
 
+  console.log("📩 CALLBACK:", data);
+
   try {
 
     // ================= MAKE OFFER =================
@@ -66,6 +67,8 @@ bot.on("callback_query", async (query) => {
       if (!priceState[userId]) priceState[userId] = {};
 
       priceState[userId][taskId] = { price: 500 };
+
+      console.log("🧠 STATE CREATED:", priceState[userId]);
 
       bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
@@ -98,7 +101,10 @@ bot.on("callback_query", async (query) => {
     ) {
       const taskId = data.split("_")[1];
 
-      if (!priceState[userId] || !priceState[userId][taskId]) return;
+      if (!priceState[userId] || !priceState[userId][taskId]) {
+        console.log("❌ STATE MISSING");
+        return;
+      }
 
       if (data.startsWith("plus_")) priceState[userId][taskId].price += 100;
       if (data.startsWith("minus_")) priceState[userId][taskId].price -= 100;
@@ -121,30 +127,42 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       const taskId = data.split("_")[1];
 
+      console.log("🟡 SUBMIT CLICKED:", taskId);
+      console.log("🧠 CURRENT STATE:", priceState[userId]);
+
       if (!priceState[userId] || !priceState[userId][taskId]) {
-        return bot.sendMessage(userId, "⚠️ Session expired.");
+        console.log("❌ SESSION EXPIRED");
+        return bot.sendMessage(userId, "⚠️ Session expired. Click Make Offer again.");
       }
 
       const price = priceState[userId][taskId].price;
 
-      await supabase.from("offers").insert([{
+      const { error } = await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
-      // 🔥 GET ORDER
+      if (error) {
+        console.log("❌ INSERT ERROR:", error);
+        return bot.sendMessage(userId, "❌ Failed to submit offer.");
+      }
+
+      console.log("✅ OFFER SAVED");
+
       const { data: orders } = await supabase
         .from("orders")
         .select("*")
         .eq("id", taskId);
 
-      if (!orders || orders.length === 0) return;
+      if (!orders || orders.length === 0) {
+        console.log("❌ ORDER NOT FOUND");
+        return;
+      }
 
       const order = orders[0];
 
-      // 🔥 FIX: NUMBER CONVERSION
       await bot.sendMessage(
         Number(order.user_id),
         "💰 New offer received!",
