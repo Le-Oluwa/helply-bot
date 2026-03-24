@@ -1,7 +1,7 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
-const { v4: uuidv4 } = require("uuid"); // 🔥 UUID FIX
+const { v4: uuidv4 } = require("uuid");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
@@ -12,7 +12,6 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-// 🔥 STATE
 const priceState = {};
 const offerMessages = {};
 
@@ -73,6 +72,7 @@ bot.on("callback_query", async (query) => {
         messageId: null
       };
 
+      // 🔥 PRICE MESSAGE (NO SUBMIT BUTTON HERE)
       const sent = await bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
           inline_keyboard: [
@@ -83,15 +83,22 @@ bot.on("callback_query", async (query) => {
             [
               { text: "➖500", callback_data: `minus500_${taskId}` },
               { text: "➕500", callback_data: `plus500_${taskId}` }
-            ],
-            [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
             ]
           ]
         }
       });
 
       priceState[userId].messageId = sent.message_id;
+
+      // 🔥 SEPARATE SUBMIT BUTTON (VERY IMPORTANT)
+      await bot.sendMessage(userId, "Ready to submit?", {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Submit Offer", callback_data: `submit_${taskId}` }]
+          ]
+        }
+      });
+
       return;
     }
 
@@ -116,35 +123,23 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].price = Math.max(100, priceState[userId].price);
 
-      // update text
       await bot.editMessageText(
         `💰 Set your price: ₦${priceState[userId].price}`,
         {
           chat_id: userId,
-          message_id: priceState[userId].messageId
-        }
-      );
-
-      // update buttons
-      await bot.editMessageReplyMarkup(
-        {
-          inline_keyboard: [
-            [
-              { text: "➖100", callback_data: `minus_${taskId}` },
-              { text: "➕100", callback_data: `plus_${taskId}` }
-            ],
-            [
-              { text: "➖500", callback_data: `minus500_${taskId}` },
-              { text: "➕500", callback_data: `plus500_${taskId}` }
-            ],
-            [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+          message_id: priceState[userId].messageId,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "➖100", callback_data: `minus_${taskId}` },
+                { text: "➕100", callback_data: `plus_${taskId}` }
+              ],
+              [
+                { text: "➖500", callback_data: `minus500_${taskId}` },
+                { text: "➕500", callback_data: `plus500_${taskId}` }
+              ]
             ]
-          ]
-        },
-        {
-          chat_id: userId,
-          message_id: priceState[userId].messageId
+          }
         }
       );
 
@@ -165,7 +160,7 @@ bot.on("callback_query", async (query) => {
       const price = priceState[userId].price;
 
       const { error } = await supabase.from("offers").insert([{
-        id: uuidv4(), // 🔥 FIX
+        id: uuidv4(),
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
