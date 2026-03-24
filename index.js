@@ -138,16 +138,30 @@ bot.on("callback_query", async (query) => {
         .eq("id", taskId)
         .single();
 
-      if (order) {
+      if (!order) return;
+
+      // 🔥 AUTO SHOW ALL OFFERS
+      const { data: offers } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("order_id", taskId);
+
+      if (offers && offers.length > 0) {
+
+        offers.sort((a, b) => a.price - b.price);
+
+        const buttons = offers.map(o => [
+          {
+            text: `👤 ${o.runner_name} — ₦${o.price}`,
+            callback_data: `select_${taskId}_${o.id}_${o.price}`
+          }
+        ]);
+
         bot.sendMessage(
           Number(order.user_id),
-          "💰 New offer received!",
+          `💰 Available Offers (${offers.length})`,
           {
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: "👀 View Offers", callback_data: `view_${taskId}` }]
-              ]
-            }
+            reply_markup: { inline_keyboard: buttons }
           }
         );
       }
