@@ -13,6 +13,7 @@ const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 // 🔥 STATE
 const priceState = {};
+const offerMessages = {}; // 🔥 NEW (for live updating offers)
 
 console.log("🚀 Helply Running");
 
@@ -185,50 +186,34 @@ bot.on("callback_query", async (query) => {
           }
         ]);
 
-        bot.sendMessage(
-          Number(order.user_id),
-          `💰 Available Offers (${offers.length})`,
-          {
-            reply_markup: { inline_keyboard: buttons }
-          }
-        );
+        const chatId = Number(order.user_id);
+
+        // 🔥 LIVE UPDATE LOGIC
+        if (!offerMessages[taskId]) {
+          const sent = await bot.sendMessage(
+            chatId,
+            `💰 Available Offers (${offers.length})`,
+            {
+              reply_markup: { inline_keyboard: buttons }
+            }
+          );
+
+          offerMessages[taskId] = sent.message_id;
+        } else {
+          await bot.editMessageText(
+            `💰 Available Offers (${offers.length})`,
+            {
+              chat_id: chatId,
+              message_id: offerMessages[taskId],
+              reply_markup: { inline_keyboard: buttons }
+            }
+          );
+        }
       }
 
       delete priceState[userId];
 
       bot.sendMessage(userId, "✅ Offer submitted!");
-
-      return;
-    }
-
-
-    // ================= VIEW OFFERS =================
-    if (data.startsWith("view_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const taskId = data.split("_")[1];
-
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", taskId);
-
-      if (!offers || offers.length === 0) {
-        return bot.sendMessage(userId, "❌ No offers yet.");
-      }
-
-      offers.sort((a, b) => a.price - b.price);
-
-      const buttons = offers.map(o => [
-        {
-          text: `👤 ${o.runner_name} — ₦${o.price}`,
-          callback_data: `select_${taskId}_${o.id}_${o.price}`
-        }
-      ]);
-
-      bot.sendMessage(userId, `💰 Available Offers (${offers.length})`, {
-        reply_markup: { inline_keyboard: buttons }
-      });
 
       return;
     }
