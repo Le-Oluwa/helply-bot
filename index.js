@@ -1,6 +1,7 @@
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
+const { v4: uuidv4 } = require("uuid"); // 🔥 UUID FIX
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
@@ -115,6 +116,7 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].price = Math.max(100, priceState[userId].price);
 
+      // update text
       await bot.editMessageText(
         `💰 Set your price: ₦${priceState[userId].price}`,
         {
@@ -123,6 +125,7 @@ bot.on("callback_query", async (query) => {
         }
       );
 
+      // update buttons
       await bot.editMessageReplyMarkup(
         {
           inline_keyboard: [
@@ -162,6 +165,7 @@ bot.on("callback_query", async (query) => {
       const price = priceState[userId].price;
 
       const { error } = await supabase.from("offers").insert([{
+        id: uuidv4(), // 🔥 FIX
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
@@ -221,7 +225,6 @@ bot.on("callback_query", async (query) => {
       delete priceState[userId];
 
       bot.sendMessage(userId, "✅ Offer submitted!");
-
       return;
     }
 
@@ -248,7 +251,6 @@ bot.on("callback_query", async (query) => {
         .neq("id", offerId);
 
       bot.sendMessage(userId, "✅ Offer selected!");
-
       return;
     }
 
