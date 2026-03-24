@@ -68,29 +68,31 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId] = {
         taskId,
-        price: 500,
-        messageId: null
+        price: 500
       };
 
-      const sent = await bot.sendMessage(userId, `💰 Set your price: ₦500`, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "➖100", callback_data: `minus_${taskId}` },
-              { text: "➕100", callback_data: `plus_${taskId}` }
-            ],
-            [
-              { text: "➖500", callback_data: `minus500_${taskId}` },
-              { text: "➕500", callback_data: `plus500_${taskId}` }
-            ],
-            [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+      await bot.sendMessage(
+        userId,
+        `💰 Set your price: ₦500`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "➖100", callback_data: `minus_${taskId}` },
+                { text: "➕100", callback_data: `plus_${taskId}` }
+              ],
+              [
+                { text: "➖500", callback_data: `minus500_${taskId}` },
+                { text: "➕500", callback_data: `plus500_${taskId}` }
+              ],
+              [
+                { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+              ]
             ]
-          ]
+          }
         }
-      });
+      );
 
-      priceState[userId].messageId = sent.message_id;
       return;
     }
 
@@ -115,11 +117,11 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].price = Math.max(100, priceState[userId].price);
 
-      await bot.editMessageText(
+      // 🔥 SEND NEW MESSAGE (NO EDITING)
+      await bot.sendMessage(
+        userId,
         `💰 Set your price: ₦${priceState[userId].price}`,
         {
-          chat_id: userId,
-          message_id: priceState[userId].messageId,
           reply_markup: {
             inline_keyboard: [
               [
