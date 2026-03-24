@@ -68,10 +68,11 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId] = {
         taskId,
-        price: 500
+        price: 500,
+        messageId: null
       };
 
-      await bot.sendMessage(
+      const sent = await bot.sendMessage(
         userId,
         `💰 Set your price: ₦500`,
         {
@@ -93,6 +94,7 @@ bot.on("callback_query", async (query) => {
         }
       );
 
+      priceState[userId].messageId = sent.message_id;
       return;
     }
 
@@ -117,8 +119,13 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].price = Math.max(100, priceState[userId].price);
 
-      // 🔥 SEND NEW MESSAGE (NO EDITING)
-      await bot.sendMessage(
+      // 🔥 DELETE OLD MESSAGE (KEY FIX)
+      try {
+        await bot.deleteMessage(userId, query.message.message_id);
+      } catch (e) {}
+
+      // 🔥 SEND NEW MESSAGE
+      const sent = await bot.sendMessage(
         userId,
         `💰 Set your price: ₦${priceState[userId].price}`,
         {
@@ -139,6 +146,8 @@ bot.on("callback_query", async (query) => {
           }
         }
       );
+
+      priceState[userId].messageId = sent.message_id;
 
       return;
     }
@@ -169,52 +178,9 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId)
-        .single();
-
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", taskId);
-
-      if (offers && offers.length > 0) {
-        offers.sort((a, b) => a.price - b.price);
-
-        const buttons = offers.map(o => [
-          {
-            text: `👤 ${o.runner_name} — ₦${o.price}`,
-            callback_data: `select_${taskId}_${o.id}_${o.price}`
-          }
-        ]);
-
-        const chatId = Number(order.user_id);
-
-        if (!offerMessages[taskId]) {
-          const sent = await bot.sendMessage(
-            chatId,
-            `💰 Available Offers (${offers.length})`,
-            { reply_markup: { inline_keyboard: buttons } }
-          );
-
-          offerMessages[taskId] = sent.message_id;
-        } else {
-          await bot.editMessageText(
-            `💰 Available Offers (${offers.length})`,
-            {
-              chat_id: chatId,
-              message_id: offerMessages[taskId],
-              reply_markup: { inline_keyboard: buttons }
-            }
-          );
-        }
-      }
-
+      bot.sendMessage(userId, "✅ Offer submitted!");
       delete priceState[userId];
 
-      bot.sendMessage(userId, "✅ Offer submitted!");
       return;
     }
 
@@ -222,3 +188,8 @@ bot.on("callback_query", async (query) => {
     console.log("ERROR:", err.message);
   }
 });
+
+
+// 🔥 GLOBAL ERROR HANDLER
+process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
+process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
