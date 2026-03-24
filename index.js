@@ -26,8 +26,12 @@ bot.on("message", async (msg) => {
   const userId = msg.chat.id;
   const text = msg.text.trim().toLowerCase();
 
-  // 🔥 SUBMIT COMMAND (MUST BE FIRST)
+  console.log("📩 MESSAGE:", text);
+
+  // ================= SUBMIT (FIXED) =================
   if (text === "submit") {
+
+    console.log("🔥 SUBMIT RECEIVED");
 
     if (!priceState[userId]) {
       return bot.sendMessage(userId, "⚠️ No active offer.");
@@ -48,6 +52,9 @@ bot.on("message", async (msg) => {
       return bot.sendMessage(userId, "❌ Failed to save offer.");
     }
 
+    console.log("✅ OFFER SAVED");
+
+    // ===== SHOW OFFERS TO USER =====
     const { data: order } = await supabase
       .from("orders")
       .select("*")
@@ -96,8 +103,8 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "✅ Offer submitted!");
   }
 
-  // ❌ IGNORE COMMANDS AFTER SUBMIT CHECK
-  if (msg.text.startsWith("/")) return;
+  // ================= IGNORE COMMANDS =================
+  if (text.startsWith("/")) return;
 
 
   // ================= NEW REQUEST =================
@@ -163,9 +170,7 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId].messageId = sent.message_id;
 
-      bot.sendMessage(userId, "👉 Type *submit* to send your offer", {
-        parse_mode: "Markdown"
-      });
+      bot.sendMessage(userId, "👉 Type 'submit' to send your offer");
 
       return;
     }
