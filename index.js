@@ -58,17 +58,19 @@ bot.on("message", async (msg) => {
 
   console.log("✅ CREATED ORDER ID:", taskId);
 
-  const { data, error } = await supabase.from("orders").insert([{
-  id: taskId,
-  user_id: userId.toString(),
-  task: taskText,
-  status: "negotiating",
-  created_at: new Date()
-}]).select();
+  const { data: orderInsert, error: orderError } = await supabase
+  .from("orders")
+  .insert([{
+    id: taskId,
+    user_id: userId.toString(),
+    task: taskText,
+    status: "negotiating",
+    created_at: new Date()
+  }])
+  .select();
 
-console.log("ORDER INSERT DATA:", data);
-console.log("ORDER INSERT ERROR:", error);
-
+console.log("🟢 ORDER INSERT RESULT:", orderInsert);
+console.log("🔴 ORDER INSERT ERROR:", orderError);
   bot.sendMessage(userId, `✅ Request sent.\nTask ID: ${taskId}`);
 
   bot.sendMessage(
@@ -149,21 +151,24 @@ bot.on("callback_query", async (query) => {
         return bot.answerCallbackQuery(query.id);
       }
     }
+   // ================= SUBMIT OFFER =================
+if (data.startsWith("submit_")) {
 
-    // ================= SUBMIT OFFER =================
-    if (data.startsWith("submit_")) {
+  if (!priceState[userId]) {
+    return bot.sendMessage(userId, "⚠️ Session expired.");
+  }
 
-      const taskIdRaw = data.split("_")[1];
-      const taskId = taskIdRaw.trim();
+  const taskId = priceState[userId].taskId;
+  const price = priceState[userId].price;
 
-      if (!priceState[userId]) {
-        console.log("❌ No price state for user:", userId);
-        return bot.sendMessage(userId, "⚠️ Session expired. Click 'Make Offer' again.");
-      }
+  console.log("🟡 STATE TASK ID:", taskId);
 
-      const price = priceState[userId].price;
+  // 🔥 CHECK DB DIRECTLY
+  const { data: allOrders } = await supabase
+    .from("orders")
+    .select("*");
 
-      console.log("📌 SUBMITTING OFFER:", { taskId, userId, price });
+  console.log("📦 ALL ORDERS:", allOrders);
 
       const { data: inserted, error } = await supabase
         .from("offers")
