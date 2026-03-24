@@ -62,6 +62,8 @@ bot.on("callback_query", async (query) => {
 
     // ================= MAKE OFFER =================
     if (data.startsWith("offer_")) {
+      await bot.answerCallbackQuery(query.id);
+
       const taskId = data.split("_")[1];
 
       if (!priceState[userId]) priceState[userId] = {};
@@ -86,7 +88,7 @@ bot.on("callback_query", async (query) => {
         }
       });
 
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
 
 
@@ -97,6 +99,8 @@ bot.on("callback_query", async (query) => {
       data.startsWith("plus500_") ||
       data.startsWith("minus500_")
     ) {
+      await bot.answerCallbackQuery(query.id);
+
       const taskId = data.split("_")[1];
 
       if (!priceState[userId] || !priceState[userId][taskId]) return;
@@ -108,31 +112,36 @@ bot.on("callback_query", async (query) => {
 
       priceState[userId][taskId].price = Math.max(100, priceState[userId][taskId].price);
 
-      // 🔥 FIXED HERE (NO MORE editMessageText)
-      bot.sendMessage(userId, `💰 Updated price: ₦${priceState[userId][taskId].price}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "➖100", callback_data: `minus_${taskId}` },
-              { text: "➕100", callback_data: `plus_${taskId}` }
-            ],
-            [
-              { text: "➖500", callback_data: `minus500_${taskId}` },
-              { text: "➕500", callback_data: `plus500_${taskId}` }
-            ],
-            [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+      bot.sendMessage(
+        userId,
+        `💰 Updated price: ₦${priceState[userId][taskId].price}`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "➖100", callback_data: `minus_${taskId}` },
+                { text: "➕100", callback_data: `plus_${taskId}` }
+              ],
+              [
+                { text: "➖500", callback_data: `minus500_${taskId}` },
+                { text: "➕500", callback_data: `plus500_${taskId}` }
+              ],
+              [
+                { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+              ]
             ]
-          ]
+          }
         }
-      });
+      );
 
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
 
 
     // ================= SUBMIT OFFER =================
     if (data.startsWith("submit_")) {
+      await bot.answerCallbackQuery(query.id);
+
       const taskId = data.split("_")[1];
 
       if (!priceState[userId] || !priceState[userId][taskId]) {
@@ -141,12 +150,17 @@ bot.on("callback_query", async (query) => {
 
       const price = priceState[userId][taskId].price;
 
-      await supabase.from("offers").insert([{
+      const { error } = await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
+
+      if (error) {
+        console.log("❌ INSERT ERROR:", error);
+        return bot.sendMessage(userId, "❌ Failed to submit offer.");
+      }
 
       const { data: orders } = await supabase
         .from("orders")
@@ -173,12 +187,14 @@ bot.on("callback_query", async (query) => {
 
       bot.sendMessage(userId, "✅ Offer submitted!");
 
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
 
 
     // ================= VIEW OFFERS =================
     if (data.startsWith("view_")) {
+      await bot.answerCallbackQuery(query.id);
+
       const taskId = data.split("_")[1];
 
       const { data: offers } = await supabase
@@ -203,12 +219,13 @@ bot.on("callback_query", async (query) => {
         reply_markup: { inline_keyboard: buttons }
       });
 
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
 
 
     // ================= SELECT OFFER =================
     if (data.startsWith("select_")) {
+      await bot.answerCallbackQuery(query.id);
 
       const parts = data.split("_");
 
@@ -229,7 +246,7 @@ bot.on("callback_query", async (query) => {
 
       bot.sendMessage(userId, "✅ Offer selected!");
 
-      return bot.answerCallbackQuery(query.id);
+      return;
     }
 
   } catch (err) {
