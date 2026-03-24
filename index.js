@@ -11,6 +11,7 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
+// 🔥 FIXED STATE STRUCTURE
 const priceState = {};
 
 console.log("🚀 Helply Running");
@@ -64,10 +65,9 @@ bot.on("callback_query", async (query) => {
 
       const taskId = data.split("_")[1];
 
-      priceState[userId] = {
-        taskId,
-        price: 500
-      };
+      if (!priceState[userId]) priceState[userId] = {};
+
+      priceState[userId][taskId] = { price: 500 };
 
       bot.sendMessage(userId, `💰 Set your price: ₦500`, {
         reply_markup: {
@@ -100,16 +100,18 @@ bot.on("callback_query", async (query) => {
     ) {
       await bot.answerCallbackQuery(query.id);
 
-      if (!priceState[userId]) return;
+      const taskId = data.split("_")[1];
 
-      if (data.startsWith("plus_")) priceState[userId].price += 100;
-      if (data.startsWith("minus_")) priceState[userId].price -= 100;
-      if (data.startsWith("plus500_")) priceState[userId].price += 500;
-      if (data.startsWith("minus500_")) priceState[userId].price -= 500;
+      if (!priceState[userId] || !priceState[userId][taskId]) return;
 
-      priceState[userId].price = Math.max(100, priceState[userId].price);
+      if (data.startsWith("plus_")) priceState[userId][taskId].price += 100;
+      if (data.startsWith("minus_")) priceState[userId][taskId].price -= 100;
+      if (data.startsWith("plus500_")) priceState[userId][taskId].price += 500;
+      if (data.startsWith("minus500_")) priceState[userId][taskId].price -= 500;
 
-      bot.sendMessage(userId, `💰 Price: ₦${priceState[userId].price}`);
+      priceState[userId][taskId].price = Math.max(100, priceState[userId][taskId].price);
+
+      bot.sendMessage(userId, `💰 Price: ₦${priceState[userId][taskId].price}`);
 
       return;
     }
@@ -119,11 +121,13 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       await bot.answerCallbackQuery(query.id);
 
-      if (!priceState[userId]) {
+      const taskId = data.split("_")[1];
+
+      if (!priceState[userId] || !priceState[userId][taskId]) {
         return bot.sendMessage(userId, "⚠️ Session expired.");
       }
 
-      const { taskId, price } = priceState[userId];
+      const price = priceState[userId][taskId].price;
 
       await supabase.from("offers").insert([{
         order_id: taskId,
@@ -140,56 +144,10 @@ bot.on("callback_query", async (query) => {
 
       if (!order) return;
 
-      // 🔥 AUTO SHOW ALL OFFERS
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
         .eq("order_id", taskId);
-
-      if (offers && offers.length > 0) {
-
-        offers.sort((a, b) => a.price - b.price);
-
-        const buttons = offers.map(o => [
-          {
-            text: `👤 ${o.runner_name} — ₦${o.price}`,
-            callback_data: `select_${taskId}_${o.id}_${o.price}`
-          }
-        ]);
-
-        bot.sendMessage(
-          Number(order.user_id),
-          `💰 Available Offers (${offers.length})`,
-          {
-            reply_markup: { inline_keyboard: buttons }
-          }
-        );
-      }
-
-      delete priceState[userId];
-
-      bot.sendMessage(userId, "✅ Offer submitted!");
-
-      return;
-    }
-
-
-    // ================= VIEW OFFERS =================
-    if (data.startsWith("view_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const taskId = data.split("_")[1];
-
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", taskId);
-
-      if (!offers || offers.length === 0) {
-        return bot.sendMessage(userId, "❌ No offers yet.");
-      }
-
-      offers.sort((a, b) => a.price - b.price);
 
       const buttons = offers.map(o => [
         {
@@ -198,36 +156,17 @@ bot.on("callback_query", async (query) => {
         }
       ]);
 
-      bot.sendMessage(userId, `💰 Available Offers (${offers.length})`, {
-        reply_markup: { inline_keyboard: buttons }
-      });
+      bot.sendMessage(
+        Number(order.user_id),
+        `💰 Available Offers (${offers.length})`,
+        {
+          reply_markup: { inline_keyboard: buttons }
+        }
+      );
 
-      return;
-    }
+      delete priceState[userId][taskId];
 
-
-    // ================= SELECT OFFER =================
-    if (data.startsWith("select_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const parts = data.split("_");
-
-      const taskId = parts[1];
-      const offerId = parts[2];
-      const price = parseInt(parts[3]);
-
-      await supabase.from("orders").update({
-        status: "awaiting_payment",
-        agreed_price: price
-      }).eq("id", taskId);
-
-      await supabase
-        .from("offers")
-        .delete()
-        .eq("order_id", taskId)
-        .neq("id", offerId);
-
-      bot.sendMessage(userId, "✅ Offer selected!");
+      bot.sendMessage(userId, "✅ Offer submitted!");
 
       return;
     }
