@@ -103,7 +103,9 @@ bot.on("callback_query", async (query) => {
 
       const taskId = data.split("_")[1];
 
-      if (!priceState[userId] || !priceState[userId][taskId]) return;
+      if (!priceState[userId] || !priceState[userId][taskId]) {
+        return bot.sendMessage(userId, "⚠️ Session expired.");
+      }
 
       if (data.startsWith("plus_")) priceState[userId][taskId].price += 100;
       if (data.startsWith("minus_")) priceState[userId][taskId].price -= 100;
@@ -150,6 +152,7 @@ bot.on("callback_query", async (query) => {
 
       const price = priceState[userId][taskId].price;
 
+      // ✅ FIXED INSERT (NO ID NEEDED)
       const { error } = await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
@@ -159,15 +162,17 @@ bot.on("callback_query", async (query) => {
 
       if (error) {
         console.log("❌ INSERT ERROR:", error);
-        return bot.sendMessage(userId, "❌ Failed to submit offer.");
+        return bot.sendMessage(userId, `❌ ${error.message}`);
       }
 
-      const { data: orders } = await supabase
+      const { data: orders, error: orderError } = await supabase
         .from("orders")
         .select("*")
         .eq("id", taskId);
 
-      if (!orders || orders.length === 0) return;
+      if (orderError || !orders || orders.length === 0) {
+        return bot.sendMessage(userId, "❌ Order not found.");
+      }
 
       const order = orders[0];
 
@@ -185,9 +190,7 @@ bot.on("callback_query", async (query) => {
 
       delete priceState[userId][taskId];
 
-      bot.sendMessage(userId, "✅ Offer submitted!");
-
-      return;
+      return bot.sendMessage(userId, "✅ Offer submitted!");
     }
 
 
