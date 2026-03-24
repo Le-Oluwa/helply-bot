@@ -21,14 +21,13 @@ console.log("🚀 Helply Running");
 // ================= MESSAGE HANDLER =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
-  if (msg.chat.type !== "private") return;
 
-  const userId = msg.chat.id;
+  const userId = msg.from.id; // 🔥 IMPORTANT: works for both group + private
   const text = msg.text.trim().toLowerCase();
 
   console.log("📩 MESSAGE:", text);
 
-  // ================= SUBMIT (FIXED) =================
+  // ================= SUBMIT =================
   if (text === "submit") {
 
     console.log("🔥 SUBMIT RECEIVED");
@@ -108,29 +107,31 @@ bot.on("message", async (msg) => {
 
 
   // ================= NEW REQUEST =================
-  const taskId = Math.random().toString(36).substring(2, 9);
+  if (msg.chat.type === "private") {
+    const taskId = Math.random().toString(36).substring(2, 9);
 
-  await supabase.from("orders").insert([{
-    id: taskId,
-    user_id: userId.toString(),
-    task: msg.text,
-    status: "negotiating",
-    created_at: new Date()
-  }]);
+    await supabase.from("orders").insert([{
+      id: taskId,
+      user_id: userId.toString(),
+      task: msg.text,
+      status: "negotiating",
+      created_at: new Date()
+    }]);
 
-  bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
+    bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
 
-  bot.sendMessage(
-    RUNNER_GROUP_ID,
-    `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${msg.text}`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💰 Make Offer", callback_data: `offer_${taskId}` }]
-        ]
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${msg.text}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}` }]
+          ]
+        }
       }
-    }
-  );
+    );
+  }
 });
 
 
