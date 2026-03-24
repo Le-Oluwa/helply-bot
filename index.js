@@ -11,7 +11,6 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-// 🔥 STATE (per runner per task)
 const priceState = {};
 
 console.log("🚀 Helply Running");
@@ -28,13 +27,15 @@ bot.on("message", async (msg) => {
 
   const taskId = Math.random().toString(36).substring(2, 9);
 
-  await supabase.from("orders").insert([{
+  const { error } = await supabase.from("orders").insert([{
     id: taskId,
     user_id: userId.toString(),
     task: taskText,
     status: "negotiating",
     created_at: new Date()
   }]);
+
+  if (error) console.log("ORDER ERROR:", error);
 
   bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
 
@@ -120,7 +121,6 @@ bot.on("callback_query", async (query) => {
     // ================= SUBMIT OFFER =================
     if (data.startsWith("submit_")) {
 
-      // 🔥 GET STATE SAFELY (no mismatch)
       const stateEntry = Object.entries(priceState).find(([k]) =>
         k.startsWith(userId + "_")
       );
@@ -132,16 +132,21 @@ bot.on("callback_query", async (query) => {
       const key = stateEntry[0];
       const { taskId, price } = stateEntry[1];
 
-      await supabase.from("offers").insert([{
+      const { error } = await supabase.from("offers").insert([{
         order_id: taskId,
         runner_id: userId.toString(),
         runner_name: query.from.first_name,
         price
       }]);
 
-      console.log("✅ OFFER SAVED FOR:", taskId);
+      if (error) {
+        console.log("OFFER ERROR:", error);
+        return bot.sendMessage(userId, "❌ Failed to submit offer.");
+      }
 
-      // 🔥 FETCH ORDER (SAFE)
+      console.log("✅ OFFER SAVED:", taskId);
+
+      // 🔥 FETCH ORDER
       const { data: orders } = await supabase
         .from("orders")
         .select("*")
@@ -154,9 +159,11 @@ bot.on("callback_query", async (query) => {
 
       const order = orders[0];
 
-      // 🔥 SEND VIEW BUTTON
-      bot.sendMessage(
-        order.user_id,
+      console.log("📤 Sending to:", order.user_id);
+
+      // 🔥 FIX: ensure number
+      await bot.sendMessage(
+        Number(order.user_id),
         "💰 New offer received!",
         {
           reply_markup: {
