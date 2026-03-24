@@ -90,34 +90,35 @@ bot.on("callback_query", async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
-    // ================= PRICE CONTROL =================
-    const taskIdFromBtn = data.split("_")[1];
-    const key = `${userId}_${taskIdFromBtn}`;
 
-    if (priceState[key]) {
+    // ================= PRICE CONTROL =================
+    if (
+      data.startsWith("plus_") ||
+      data.startsWith("minus_") ||
+      data.startsWith("plus500_") ||
+      data.startsWith("minus500_")
+    ) {
+      const taskId = data.split("_")[1];
+      const key = `${userId}_${taskId}`;
+
+      if (!priceState[key]) return;
 
       if (data.startsWith("plus_")) priceState[key].price += 100;
       if (data.startsWith("minus_")) priceState[key].price = Math.max(100, priceState[key].price - 100);
       if (data.startsWith("plus500_")) priceState[key].price += 500;
       if (data.startsWith("minus500_")) priceState[key].price = Math.max(100, priceState[key].price - 500);
 
-      if (
-        data.startsWith("plus_") ||
-        data.startsWith("minus_") ||
-        data.startsWith("plus500_") ||
-        data.startsWith("minus500_")
-      ) {
-        const current = priceState[key].price;
+      const current = priceState[key].price;
 
-        bot.editMessageText(`💰 Set your price: ₦${current}`, {
-          chat_id: query.message.chat.id,
-          message_id: query.message.message_id,
-          reply_markup: query.message.reply_markup
-        });
+      bot.editMessageText(`💰 Set your price: ₦${current}`, {
+        chat_id: query.message.chat.id,
+        message_id: query.message.message_id,
+        reply_markup: query.message.reply_markup
+      });
 
-        return bot.answerCallbackQuery(query.id);
-      }
+      return bot.answerCallbackQuery(query.id);
     }
+
 
     // ================= SUBMIT OFFER =================
     if (data.startsWith("submit_")) {
@@ -145,7 +146,7 @@ bot.on("callback_query", async (query) => {
 
       console.log("✅ OFFER SAVED FOR:", taskId);
 
-      // 🔥 notify user with ONE button
+      // 🔥 notify user
       const { data: order } = await supabase
         .from("orders")
         .select("user_id")
@@ -173,17 +174,20 @@ bot.on("callback_query", async (query) => {
       return bot.answerCallbackQuery(query.id);
     }
 
+
     // ================= VIEW OFFERS =================
     if (data.startsWith("view_")) {
 
       const taskId = data.split("_")[1];
+
+      console.log("🔍 Viewing offers for:", taskId);
 
       const { data: offers, error } = await supabase
         .from("offers")
         .select("*")
         .eq("order_id", taskId);
 
-      console.log("OFFERS FOUND:", offers);
+      console.log("📦 OFFERS:", offers);
 
       if (!offers || offers.length === 0) {
         return bot.sendMessage(userId, "❌ No offers yet.");
@@ -191,18 +195,23 @@ bot.on("callback_query", async (query) => {
 
       offers.sort((a, b) => a.price - b.price);
 
-      const buttons = offers.map(o => [
-        {
-          text: `👤 ${o.runner_name} — ₦${o.price}`,
-          callback_data: `select_${taskId}_${o.id}_${o.price}`
-        }
-      ]);
+      const buttons = [];
 
-      bot.sendMessage(
+      for (let i = 0; i < offers.length; i++) {
+        const o = offers[i];
+
+        buttons.push([
+          {
+            text: `👤 ${o.runner_name} — ₦${o.price}`,
+            callback_data: `select_${taskId}_${o.id}_${o.price}`
+          }
+        ]);
+      }
+
+      await bot.sendMessage(
         userId,
-        "💰 *Available Offers:*",
+        `💰 Available Offers (${offers.length})`,
         {
-          parse_mode: "Markdown",
           reply_markup: {
             inline_keyboard: buttons
           }
@@ -211,6 +220,7 @@ bot.on("callback_query", async (query) => {
 
       return bot.answerCallbackQuery(query.id);
     }
+
 
     // ================= SELECT OFFER =================
     if (data.startsWith("select_")) {
@@ -226,7 +236,7 @@ bot.on("callback_query", async (query) => {
         agreed_price: price
       }).eq("id", taskId);
 
-      // 🔥 delete other offers
+      // 🔥 remove other offers
       await supabase
         .from("offers")
         .delete()
