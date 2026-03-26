@@ -13,7 +13,6 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 const priceState = {};
-const offerMessages = {};
 
 console.log("🚀 Helply Running");
 
@@ -69,66 +68,38 @@ bot.on("callback_query", async (query) => {
   try {
 
     // ================= MAKE OFFER =================
-    if (data.startsWith("submit_")) {
-  await bot.answerCallbackQuery(query.id);
+    if (data.startsWith("offer_")) {
+      await bot.answerCallbackQuery(query.id);
 
-  const taskId = data.split("_")[1];
+      const taskId = data.split("_")[1];
 
-  if (!priceState[userId] || priceState[userId].taskId !== taskId) {
-    return bot.sendMessage(userId, "⚠️ No active offer.");
-  }
+      priceState[userId] = {
+        taskId,
+        price: 500,
+        messageId: null
+      };
 
-  const { price } = priceState[userId];
+      const sent = await bot.sendMessage(userId, `💰 Set your price: ₦500`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "➖100", callback_data: `minus_${taskId}` },
+              { text: "➕100", callback_data: `plus_${taskId}` }
+            ],
+            [
+              { text: "➖500", callback_data: `minus500_${taskId}` },
+              { text: "➕500", callback_data: `plus500_${taskId}` }
+            ],
+            [
+              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+            ]
+          ]
+        }
+      });
 
-  const { error } = await supabase.from("offers").insert([{
-    id: uuidv4(),
-    order_id: taskId,
-    runner_id: userId.toString(),
-    runner_name: query.from.first_name,
-    price
-  }]);
-
-  if (error) {
-    console.log("❌ ERROR:", error);
-    return bot.sendMessage(userId, "❌ Failed to save offer.");
-  }
-
-  // 🔥 GET ORDER OWNER
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", taskId)
-    .single();
-
-  if (!order) {
-    return bot.sendMessage(userId, "❌ Order not found.");
-  }
-
-  // 🔥 GET ALL OFFERS
-  const { data: offers } = await supabase
-    .from("offers")
-    .select("*")
-    .eq("order_id", taskId);
-
-  if (offers && offers.length > 0) {
-    offers.sort((a, b) => a.price - b.price);
-
-    const text = offers
-      .map(o => `👤 ${o.runner_name} — ₦${o.price}`)
-      .join("\n");
-
-    const chatId = parseInt(order.user_id, 10);
-
-    await bot.sendMessage(
-      chatId,
-      `💰 Available Offers:\n\n${text}`
-    );
-  }
-
-  delete priceState[userId];
-
-  return bot.sendMessage(userId, "✅ Offer submitted!");
-}
+      priceState[userId].messageId = sent.message_id;
+      return;
+    }
 
 
     // ================= PRICE CONTROL =================
@@ -203,6 +174,38 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
+      // 🔥 FETCH ORDER
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", taskId)
+        .single();
+
+      if (!order) {
+        return bot.sendMessage(userId, "❌ Order not found.");
+      }
+
+      // 🔥 FETCH OFFERS
+      const { data: offers } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("order_id", taskId);
+
+      if (offers && offers.length > 0) {
+        offers.sort((a, b) => a.price - b.price);
+
+        const offerText = offers
+          .map(o => `👤 ${o.runner_name} — ₦${o.price}`)
+          .join("\n");
+
+        const chatId = parseInt(order.user_id, 10);
+
+        await bot.sendMessage(
+          chatId,
+          `💰 Available Offers:\n\n${offerText}`
+        );
+      }
+
       delete priceState[userId];
 
       return bot.sendMessage(userId, "✅ Offer submitted!");
@@ -237,4 +240,9 @@ bot.on("callback_query", async (query) => {
   } catch (err) {
     console.log("ERROR:", err.message);
   }
-}); 
+});
+
+
+// ================= ERROR HANDLER =================
+process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
+process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
