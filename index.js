@@ -26,17 +26,17 @@ bot.on("message", async (msg) => {
 
   console.log("📩 MESSAGE:", text);
 
-  // ignore commands
   if (text.startsWith("/")) return;
 
   // ================= NEW REQUEST =================
   if (msg.chat.type === "private") {
-    const taskId = Math.random().toString(36).substring(2, 9);
+
+    const taskId = Date.now(); // ✅ FIXED
 
     const { error } = await supabase.from("orders").insert([{
       id: taskId,
       user_id: userId.toString(),
-      delivery_location: text, // ✅ FIXED
+      delivery_location: text,
       status: "negotiating",
       created_at: new Date()
     }]);
@@ -78,7 +78,7 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("offer_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = data.split("_")[1];
+      const taskId = Number(data.split("_")[1]); // ✅ ensure number
 
       priceState[userId] = {
         taskId,
@@ -118,7 +118,7 @@ bot.on("callback_query", async (query) => {
     ) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = data.split("_")[1];
+      const taskId = Number(data.split("_")[1]); // ✅ FIXED
 
       if (!priceState[userId] || priceState[userId].taskId !== taskId) return;
 
@@ -160,7 +160,7 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = data.split("_")[1];
+      const taskId = Number(data.split("_")[1]); // ✅ FIXED
 
       if (!priceState[userId] || priceState[userId].taskId !== taskId) {
         return bot.sendMessage(userId, "⚠️ No active offer.");
@@ -181,51 +181,12 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
-      // 🔥 FETCH ORDER
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", taskId)
-        .maybeSingle();
-
-      if (!order) {
-        console.log("❌ ORDER NOT FOUND:", taskId);
-        return bot.sendMessage(userId, "❌ Order not found.");
-      }
-
-      // 🔥 FETCH OFFERS
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", taskId);
-
-      if (offers && offers.length > 0) {
-        offers.sort((a, b) => a.price - b.price);
-
-        const offerText = offers
-          .map(o => `👤 ${o.runner_name} — ₦${o.price}`)
-          .join("\n");
-
-        const chatId = parseInt(order.user_id, 10);
-
-        await bot.sendMessage(
-          chatId,
-          `💰 Available Offers:\n\n${offerText}`
-        );
-      }
-
       delete priceState[userId];
 
       return bot.sendMessage(userId, "✅ Offer submitted!");
     }
 
-
   } catch (err) {
     console.log("ERROR:", err.message);
   }
 });
-
-
-// ================= ERROR HANDLER =================
-process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
-process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
