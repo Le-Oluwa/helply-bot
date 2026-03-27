@@ -236,17 +236,18 @@ bot.on("callback_query", async (query) => {
       );
 
       // 🔥 notify runner
-      await bot.sendMessage(
-        parseInt(offer.runner_id),
-        `🎉 You’ve been selected for a task!
+await bot.sendMessage(
+  parseInt(offer.runner_id),
+  `🎉 You’ve been selected for a task!
 
 🆔 Task ID: ${taskId}
 📍 Task: ${order?.delivery_location || "N/A"}
 💵 Agreed Price: ₦${offer.price}
 
-🚀 Please proceed with the task.`
-      );
+⏳ Please standby for payment confirmation.
 
+You will be notified once payment is completed.`
+);
       return;
     }
 
