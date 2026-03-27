@@ -176,7 +176,7 @@ bot.on("callback_query", async (query) => {
         const buttons = offers.map(o => [
           {
             text: `👤 ${o.runner_name} — ₦${o.price}`,
-            callback_data: `select_${taskId}_${o.id}_${o.price}_${o.runner_id}`
+            callback_data: `select_${o.id}` // ✅ FIXED (SHORT)
           }
         ]);
 
@@ -195,26 +195,36 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("select_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const parts = data.split("_");
+      const offerId = data.split("_")[1];
 
-      const taskId = Number(parts[1]);
-      const offerId = parts[2];
-      const price = Number(parts[3]);
-      const runnerId = parts[4];
+      // 🔥 fetch offer from DB
+      const { data: offer } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("id", offerId)
+        .maybeSingle();
 
+      if (!offer) {
+        return bot.sendMessage(userId, "❌ Offer not found.");
+      }
+
+      const taskId = Number(offer.order_id);
+
+      // 🔥 update order
       await supabase.from("orders").update({
         status: "assigned",
-        agreed_price: price,
-        assigned_runner_id: runnerId
+        agreed_price: offer.price,
+        assigned_runner_id: offer.runner_id
       }).eq("id", taskId);
 
+      // 🔥 delete other offers
       await supabase
         .from("offers")
         .delete()
         .eq("order_id", String(taskId))
         .neq("id", offerId);
 
-      await bot.sendMessage(userId, `✅ Offer selected!\n💵 ₦${price}`);
+      await bot.sendMessage(userId, `✅ Offer selected!\n💵 ₦${offer.price}`);
 
       return;
     }
