@@ -26,7 +26,6 @@ bot.on("message", async (msg) => {
 
   if (text.startsWith("/")) return;
 
-  // ================= CREATE ORDER =================
   if (msg.chat.type === "private") {
 
     const taskId = Date.now();
@@ -158,6 +157,18 @@ bot.on("callback_query", async (query) => {
 
       const taskId = Number(data.split("_")[1]);
 
+      // 🔥 VALIDATE STATE
+      if (!priceState[userId]) {
+        return bot.sendMessage(userId, "⚠️ Please start offer again.");
+      }
+
+      if (priceState[userId].taskId !== taskId) {
+        return bot.sendMessage(userId, "⚠️ Offer expired. Start again.");
+      }
+
+      const { price } = priceState[userId];
+
+      // 🔥 GET ORDER
       const { data: order } = await supabase
         .from("orders")
         .select("*")
@@ -168,14 +179,13 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Order not found.");
       }
 
-      // 🚫 Prevent self bidding
+      // 🚫 PREVENT OWNER
       if (order.user_id === userId.toString()) {
         return bot.sendMessage(userId, "❌ You cannot bid on your own request.");
       }
 
-      const { price } = priceState[userId];
-
-      const { data: newOffer } = await supabase
+      // 🔥 SAVE OFFER
+      const { data: newOffer, error } = await supabase
         .from("offers")
         .insert([{
           id: uuidv4(),
@@ -188,9 +198,14 @@ bot.on("callback_query", async (query) => {
         .select()
         .single();
 
-      console.log("📦 OFFER SAVED:", newOffer);
+      if (error) {
+        console.log("❌ OFFER ERROR:", error);
+        return bot.sendMessage(userId, "❌ Failed to save offer.");
+      }
 
-      // 🔥 FETCH ALL OFFERS
+      console.log("✅ OFFER SAVED:", newOffer);
+
+      // 🔥 FETCH OFFERS
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -230,21 +245,19 @@ bot.on("callback_query", async (query) => {
       const price = Number(parts[3]);
       const runnerId = parts[4];
 
-      // 🔥 UPDATE ORDER WITH FULL TRACKING
       await supabase.from("orders").update({
         status: "assigned",
         agreed_price: price,
         assigned_runner_id: runnerId
       }).eq("id", taskId);
 
-      // 🔥 DELETE OTHER OFFERS
       await supabase
         .from("offers")
         .delete()
         .eq("order_id", String(taskId))
         .neq("id", offerId);
 
-      console.log("✅ ORDER ASSIGNED:", taskId, runnerId, price);
+      console.log("✅ ORDER ASSIGNED:", taskId);
 
       await bot.sendMessage(userId, `✅ Offer selected!\n💵 ₦${price}`);
 
@@ -255,3 +268,8 @@ bot.on("callback_query", async (query) => {
     console.log("ERROR:", err.message);
   }
 });
+
+
+// ================= ERROR HANDLING =================
+process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
+process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
