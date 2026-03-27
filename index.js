@@ -73,6 +73,17 @@ bot.on("callback_query", async (query) => {
       const taskId = Number(parts[1]);
       const price = Number(parts[2]);
 
+      // 🚫 block if already assigned
+      const { data: order } = await supabase
+        .from("orders")
+        .select("status")
+        .eq("id", taskId)
+        .maybeSingle();
+
+      if (order && order.status === "assigned") {
+        return bot.sendMessage(userId, "❌ This task already has a runner.");
+      }
+
       await bot.sendMessage(userId, `💰 Set your price: ₦${price}`, {
         reply_markup: {
           inline_keyboard: [
@@ -145,7 +156,10 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Order not found.");
       }
 
-      // 🚫 prevent self bidding
+      if (order.status === "assigned") {
+        return bot.sendMessage(userId, "❌ Task already assigned.");
+      }
+
       if (order.user_id === userId.toString()) {
         return bot.sendMessage(userId, "❌ You cannot bid on your own request.");
       }
@@ -164,7 +178,6 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
-      // 🔥 fetch offers
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -215,39 +228,43 @@ bot.on("callback_query", async (query) => {
         .eq("id", taskId)
         .maybeSingle();
 
-      // 🔥 update order
-      await supabase.from("orders").update({
-        status: "assigned",
-        agreed_price: offer.price,
-        assigned_runner_id: offer.runner_id
-      }).eq("id", taskId);
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "assigned",
+          agreed_price: offer.price,
+          runner_id: offer.runner_id // ✅ FIXED
+        })
+        .eq("id", Number(taskId));
 
-      // 🔥 delete other offers
+      if (error) {
+        console.log("❌ UPDATE ERROR:", error);
+      } else {
+        console.log("✅ ORDER UPDATED");
+      }
+
       await supabase
         .from("offers")
         .delete()
         .eq("order_id", String(taskId))
         .neq("id", offerId);
 
-      // ✅ notify customer
       await bot.sendMessage(
         userId,
         `✅ Offer selected!\n💵 ₦${offer.price}`
       );
 
-      // 🔥 notify runner
-await bot.sendMessage(
-  parseInt(offer.runner_id),
-  `🎉 You’ve been selected for a task!
+      await bot.sendMessage(
+        parseInt(offer.runner_id),
+        `🎉 You’ve been selected!
 
 🆔 Task ID: ${taskId}
-📍 Task: ${order?.delivery_location || "N/A"}
-💵 Agreed Price: ₦${offer.price}
+📍 ${order?.delivery_location}
+💵 ₦${offer.price}
 
-⏳ Please standby for payment confirmation.
+⏳ Please standby for payment confirmation.`
+      );
 
-You will be notified once payment is completed.`
-);
       return;
     }
 
@@ -255,8 +272,3 @@ You will be notified once payment is completed.`
     console.log("ERROR:", err.message);
   }
 });
-
-
-// ================= ERROR HANDLING =================
-process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
-process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
