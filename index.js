@@ -33,13 +33,20 @@ bot.on("message", async (msg) => {
   if (msg.chat.type === "private") {
     const taskId = Math.random().toString(36).substring(2, 9);
 
-    await supabase.from("orders").insert([{
+    const { error } = await supabase.from("orders").insert([{
       id: taskId,
       user_id: userId.toString(),
-      task: text,
+      delivery_location: text, // ✅ FIXED
       status: "negotiating",
       created_at: new Date()
     }]);
+
+    if (error) {
+      console.log("❌ ORDER ERROR:", error);
+      return bot.sendMessage(userId, "❌ Failed to create request.");
+    }
+
+    console.log("✅ ORDER CREATED:", taskId);
 
     bot.sendMessage(userId, `✅ Request sent\nTask ID: ${taskId}`);
 
@@ -170,7 +177,7 @@ bot.on("callback_query", async (query) => {
       }]);
 
       if (error) {
-        console.log("❌ ERROR:", error);
+        console.log("❌ OFFER ERROR:", error);
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
@@ -179,9 +186,10 @@ bot.on("callback_query", async (query) => {
         .from("orders")
         .select("*")
         .eq("id", taskId)
-        .single();
+        .maybeSingle();
 
       if (!order) {
+        console.log("❌ ORDER NOT FOUND:", taskId);
         return bot.sendMessage(userId, "❌ Order not found.");
       }
 
@@ -211,31 +219,6 @@ bot.on("callback_query", async (query) => {
       return bot.sendMessage(userId, "✅ Offer submitted!");
     }
 
-
-    // ================= SELECT OFFER =================
-    if (data.startsWith("select_")) {
-      await bot.answerCallbackQuery(query.id);
-
-      const parts = data.split("_");
-
-      const taskId = parts[1];
-      const offerId = parts[2];
-      const price = parseInt(parts[3]);
-
-      await supabase.from("orders").update({
-        status: "awaiting_payment",
-        agreed_price: price
-      }).eq("id", taskId);
-
-      await supabase
-        .from("offers")
-        .delete()
-        .eq("order_id", taskId)
-        .neq("id", offerId);
-
-      bot.sendMessage(userId, "✅ Offer selected!");
-      return;
-    }
 
   } catch (err) {
     console.log("ERROR:", err.message);
