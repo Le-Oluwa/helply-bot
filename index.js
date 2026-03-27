@@ -12,8 +12,6 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
-const priceState = {};
-
 console.log("🚀 Helply Running");
 
 
@@ -43,8 +41,6 @@ bot.on("message", async (msg) => {
       return bot.sendMessage(userId, "❌ Failed to create request.");
     }
 
-    console.log("✅ ORDER CREATED:", taskId);
-
     bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
     bot.sendMessage(
@@ -53,7 +49,7 @@ bot.on("message", async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}` }]
+            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}_500` }]
           ]
         }
       }
@@ -69,83 +65,63 @@ bot.on("callback_query", async (query) => {
 
   try {
 
-    // ================= MAKE OFFER =================
+    // ================= START OFFER =================
     if (data.startsWith("offer_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = Number(data.split("_")[1]);
+      const parts = data.split("_");
+      const taskId = Number(parts[1]);
+      const price = Number(parts[2]);
 
-      priceState[userId] = {
-        taskId,
-        price: 500,
-        messageId: null
-      };
-
-      const sent = await bot.sendMessage(userId, `💰 Set your price: ₦500`, {
+      await bot.sendMessage(userId, `💰 Set your price: ₦${price}`, {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "➖100", callback_data: `minus_${taskId}` },
-              { text: "➕100", callback_data: `plus_${taskId}` }
+              { text: "➖100", callback_data: `price_${taskId}_${price - 100}` },
+              { text: "➕100", callback_data: `price_${taskId}_${price + 100}` }
             ],
             [
-              { text: "➖500", callback_data: `minus500_${taskId}` },
-              { text: "➕500", callback_data: `plus500_${taskId}` }
+              { text: "➖500", callback_data: `price_${taskId}_${price - 500}` },
+              { text: "➕500", callback_data: `price_${taskId}_${price + 500}` }
             ],
             [
-              { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
+              { text: "✅ Submit Offer", callback_data: `submit_${taskId}_${price}` }
             ]
           ]
         }
       });
 
-      priceState[userId].messageId = sent.message_id;
       return;
     }
 
 
-    // ================= PRICE CONTROL =================
-    if (
-      data.startsWith("plus_") ||
-      data.startsWith("minus_") ||
-      data.startsWith("plus500_") ||
-      data.startsWith("minus500_")
-    ) {
+    // ================= UPDATE PRICE =================
+    if (data.startsWith("price_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = Number(data.split("_")[1]);
+      const parts = data.split("_");
+      const taskId = Number(parts[1]);
+      let price = Number(parts[2]);
 
-      if (!priceState[userId]) return;
+      price = Math.max(100, price);
 
-      if (data.startsWith("plus_")) priceState[userId].price += 100;
-      if (data.startsWith("minus_")) priceState[userId].price -= 100;
-      if (data.startsWith("plus500_")) priceState[userId].price += 500;
-      if (data.startsWith("minus500_")) priceState[userId].price -= 500;
-
-      priceState[userId].price = Math.max(100, priceState[userId].price);
-
-      await bot.editMessageText(
-        `💰 Set your price: ₦${priceState[userId].price}`,
-        {
-          chat_id: userId,
-          message_id: priceState[userId].messageId,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: "➖100", callback_data: `minus_${taskId}` },
-                { text: "➕100", callback_data: `plus_${taskId}` }
-              ],
-              [
-                { text: "➖500", callback_data: `minus500_${taskId}` },
-                { text: "➕500", callback_data: `plus500_${taskId}` }
-              ],
-              [
-                { text: "✅ Submit Offer", callback_data: `submit_${taskId}` }
-              ]
+      await bot.sendMessage(userId, `💰 Set your price: ₦${price}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "➖100", callback_data: `price_${taskId}_${price - 100}` },
+              { text: "➕100", callback_data: `price_${taskId}_${price + 100}` }
+            ],
+            [
+              { text: "➖500", callback_data: `price_${taskId}_${price - 500}` },
+              { text: "➕500", callback_data: `price_${taskId}_${price + 500}` }
+            ],
+            [
+              { text: "✅ Submit Offer", callback_data: `submit_${taskId}_${price}` }
             ]
-          }
+          ]
         }
-      );
+      });
 
       return;
     }
@@ -155,20 +131,10 @@ bot.on("callback_query", async (query) => {
     if (data.startsWith("submit_")) {
       await bot.answerCallbackQuery(query.id);
 
-      const taskId = Number(data.split("_")[1]);
+      const parts = data.split("_");
+      const taskId = Number(parts[1]);
+      const price = Number(parts[2]);
 
-      // 🔥 VALIDATE STATE
-      if (!priceState[userId]) {
-        return bot.sendMessage(userId, "⚠️ Please start offer again.");
-      }
-
-      if (priceState[userId].taskId !== taskId) {
-        return bot.sendMessage(userId, "⚠️ Offer expired. Start again.");
-      }
-
-      const { price } = priceState[userId];
-
-      // 🔥 GET ORDER
       const { data: order } = await supabase
         .from("orders")
         .select("*")
@@ -179,33 +145,26 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Order not found.");
       }
 
-      // 🚫 PREVENT OWNER
+      // 🚫 prevent self bidding
       if (order.user_id === userId.toString()) {
         return bot.sendMessage(userId, "❌ You cannot bid on your own request.");
       }
 
-      // 🔥 SAVE OFFER
-      const { data: newOffer, error } = await supabase
-        .from("offers")
-        .insert([{
-          id: uuidv4(),
-          order_id: String(taskId),
-          runner_id: userId.toString(),
-          runner_name: query.from.first_name,
-          price,
-          created_at: new Date()
-        }])
-        .select()
-        .single();
+      const { error } = await supabase.from("offers").insert([{
+        id: uuidv4(),
+        order_id: String(taskId),
+        runner_id: userId.toString(),
+        runner_name: query.from.first_name,
+        price,
+        created_at: new Date()
+      }]);
 
       if (error) {
         console.log("❌ OFFER ERROR:", error);
         return bot.sendMessage(userId, "❌ Failed to save offer.");
       }
 
-      console.log("✅ OFFER SAVED:", newOffer);
-
-      // 🔥 FETCH OFFERS
+      // 🔥 fetch offers
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -227,8 +186,6 @@ bot.on("callback_query", async (query) => {
           { reply_markup: { inline_keyboard: buttons } }
         );
       }
-
-      delete priceState[userId];
 
       return bot.sendMessage(userId, "✅ Offer submitted!");
     }
@@ -257,8 +214,6 @@ bot.on("callback_query", async (query) => {
         .eq("order_id", String(taskId))
         .neq("id", offerId);
 
-      console.log("✅ ORDER ASSIGNED:", taskId);
-
       await bot.sendMessage(userId, `✅ Offer selected!\n💵 ₦${price}`);
 
       return;
@@ -268,8 +223,3 @@ bot.on("callback_query", async (query) => {
     console.log("ERROR:", err.message);
   }
 });
-
-
-// ================= ERROR HANDLING =================
-process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
-process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
