@@ -176,7 +176,7 @@ bot.on("callback_query", async (query) => {
         const buttons = offers.map(o => [
           {
             text: `👤 ${o.runner_name} — ₦${o.price}`,
-            callback_data: `select_${o.id}` // ✅ FIXED (SHORT)
+            callback_data: `select_${o.id}`
           }
         ]);
 
@@ -197,7 +197,6 @@ bot.on("callback_query", async (query) => {
 
       const offerId = data.split("_")[1];
 
-      // 🔥 fetch offer from DB
       const { data: offer } = await supabase
         .from("offers")
         .select("*")
@@ -209,6 +208,12 @@ bot.on("callback_query", async (query) => {
       }
 
       const taskId = Number(offer.order_id);
+
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", taskId)
+        .maybeSingle();
 
       // 🔥 update order
       await supabase.from("orders").update({
@@ -224,7 +229,23 @@ bot.on("callback_query", async (query) => {
         .eq("order_id", String(taskId))
         .neq("id", offerId);
 
-      await bot.sendMessage(userId, `✅ Offer selected!\n💵 ₦${offer.price}`);
+      // ✅ notify customer
+      await bot.sendMessage(
+        userId,
+        `✅ Offer selected!\n💵 ₦${offer.price}`
+      );
+
+      // 🔥 notify runner
+      await bot.sendMessage(
+        parseInt(offer.runner_id),
+        `🎉 You’ve been selected for a task!
+
+🆔 Task ID: ${taskId}
+📍 Task: ${order?.delivery_location || "N/A"}
+💵 Agreed Price: ₦${offer.price}
+
+🚀 Please proceed with the task.`
+      );
 
       return;
     }
@@ -233,3 +254,8 @@ bot.on("callback_query", async (query) => {
     console.log("ERROR:", err.message);
   }
 });
+
+
+// ================= ERROR HANDLING =================
+process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
+process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
