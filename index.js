@@ -41,8 +41,20 @@ bot.on("message", async (msg) => {
       return bot.sendMessage(userId, "❌ Failed to create request.");
     }
 
-    bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
+    // ✅ user message with cancel
+    bot.sendMessage(
+      userId,
+      `✅ Request sent\n🆔 ${taskId}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }]
+          ]
+        }
+      }
+    );
 
+    // ✅ send to runners
     bot.sendMessage(
       RUNNER_GROUP_ID,
       `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${text}`,
@@ -65,6 +77,43 @@ bot.on("callback_query", async (query) => {
 
   try {
 
+    // ================= CANCEL TASK =================
+    if (data.startsWith("cancel_")) {
+      await bot.answerCallbackQuery(query.id);
+
+      const taskId = Number(data.split("_")[1]);
+
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", taskId)
+        .maybeSingle();
+
+      if (!order) {
+        return bot.sendMessage(userId, "❌ Task not found.");
+      }
+
+      await supabase
+        .from("orders")
+        .update({ status: "cancelled" })
+        .eq("id", taskId);
+
+      await bot.sendMessage(
+        parseInt(order.user_id),
+        `❌ Task ${taskId} has been cancelled.`
+      );
+
+      if (order.runner_id) {
+        await bot.sendMessage(
+          parseInt(order.runner_id),
+          `❌ Task ${taskId} has been cancelled.`
+        );
+      }
+
+      return;
+    }
+
+
     // ================= START OFFER =================
     if (data.startsWith("offer_")) {
       await bot.answerCallbackQuery(query.id);
@@ -73,7 +122,6 @@ bot.on("callback_query", async (query) => {
       const taskId = Number(parts[1]);
       const price = Number(parts[2]);
 
-      // 🚫 block if already assigned
       const { data: order } = await supabase
         .from("orders")
         .select("status")
@@ -82,6 +130,10 @@ bot.on("callback_query", async (query) => {
 
       if (order && order.status === "assigned") {
         return bot.sendMessage(userId, "❌ This task already has a runner.");
+      }
+
+      if (order && order.status === "cancelled") {
+        return bot.sendMessage(userId, "❌ This task has been cancelled.");
       }
 
       await bot.sendMessage(userId, `💰 Set your price: ₦${price}`, {
@@ -160,6 +212,10 @@ bot.on("callback_query", async (query) => {
         return bot.sendMessage(userId, "❌ Task already assigned.");
       }
 
+      if (order.status === "cancelled") {
+        return bot.sendMessage(userId, "❌ Task has been cancelled.");
+      }
+
       if (order.user_id === userId.toString()) {
         return bot.sendMessage(userId, "❌ You cannot bid on your own request.");
       }
@@ -228,20 +284,14 @@ bot.on("callback_query", async (query) => {
         .eq("id", taskId)
         .maybeSingle();
 
-      const { error } = await supabase
+      await supabase
         .from("orders")
         .update({
           status: "assigned",
           agreed_price: offer.price,
-          runner_id: offer.runner_id // ✅ FIXED
+          runner_id: offer.runner_id
         })
         .eq("id", Number(taskId));
-
-      if (error) {
-        console.log("❌ UPDATE ERROR:", error);
-      } else {
-        console.log("✅ ORDER UPDATED");
-      }
 
       await supabase
         .from("offers")
@@ -262,7 +312,14 @@ bot.on("callback_query", async (query) => {
 📍 ${order?.delivery_location}
 💵 ₦${offer.price}
 
-⏳ Please standby for payment confirmation.`
+⏳ Please standby for payment confirmation.`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }]
+            ]
+          }
+        }
       );
 
       return;
@@ -272,3 +329,8 @@ bot.on("callback_query", async (query) => {
     console.log("ERROR:", err.message);
   }
 });
+
+
+// ================= ERROR HANDLING =================
+process.on("unhandledRejection", (err) => console.log("UNHANDLED:", err));
+process.on("uncaughtException", (err) => console.log("UNCAUGHT:", err));
