@@ -17,12 +17,14 @@ const negotiationState = {};
 console.log("🚀 Helply Running");
 
 
-// ================= CREATE ORDER =================
+// ================= MESSAGE =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
 
   const userId = msg.from.id;
-  const text = msg.text;
+  const text = msg.text.trim();
+
+  if (text.startsWith("/")) return;
 
   // ================= NEGOTIATION INPUT =================
   if (negotiationState[userId]) {
@@ -37,7 +39,6 @@ bot.on("message", async (msg) => {
 
     if (!offer) return;
 
-    // update DB
     await supabase
       .from("offers")
       .update({
@@ -46,7 +47,6 @@ bot.on("message", async (msg) => {
       })
       .eq("id", offerId);
 
-    // ================= USER COUNTER =================
     if (role === "user") {
       await bot.sendMessage(
         offer.runner_id,
@@ -63,7 +63,6 @@ bot.on("message", async (msg) => {
       );
     }
 
-    // ================= RUNNER COUNTER =================
     if (role === "runner") {
       await bot.sendMessage(
         offer.user_id,
@@ -84,13 +83,11 @@ bot.on("message", async (msg) => {
     return;
   }
 
-
   // ================= CREATE ORDER =================
   if (msg.chat.type === "private") {
-
     const taskId = Date.now();
 
-    await supabase.from("orders").insert([{
+    const { error } = await supabase.from("orders").insert([{
       id: taskId,
       user_id: userId.toString(),
       delivery_location: text,
@@ -98,15 +95,30 @@ bot.on("message", async (msg) => {
       created_at: new Date()
     }]);
 
-    bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
+    if (error) {
+      console.log("❌ ORDER ERROR:", error);
+      return bot.sendMessage(userId, "❌ Failed to create request.");
+    }
 
     bot.sendMessage(
-      RUNNER_GROUP_ID,
-      `🚨 NEW TASK\n🆔 ${taskId}\n📌 ${text}`,
+      userId,
+      `✅ Request sent\n🆔 ${taskId}`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${taskId}` }]
+          ]
+        }
+      }
+    );
+
+    bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🚨 NEW REQUEST\n\n🆔 ${taskId}\n📌 ${text}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}_500` }]
           ]
         }
       }
@@ -122,7 +134,16 @@ bot.on("callback_query", async (query) => {
 
   try {
 
-    // ================= START OFFER =================
+    // ================= CANCEL =================
+    if (data.startsWith("cancel_")) {
+      const taskId = Number(data.split("_")[1]);
+
+      await supabase.from("orders").update({ status: "cancelled" }).eq("id", taskId);
+
+      return bot.sendMessage(userId, "❌ Task cancelled.");
+    }
+
+    // ================= OFFER =================
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
 
@@ -181,7 +202,7 @@ bot.on("callback_query", async (query) => {
 
       const buttons = offers.map(o => [
         {
-          text: `${o.runner_name} - ₦${o.current_price}`,
+          text: `👤 ${o.runner_name} — ₦${o.current_price}`,
           callback_data: `view_${o.id}`
         }
       ]);
@@ -218,21 +239,16 @@ bot.on("callback_query", async (query) => {
       );
     }
 
-    // ================= USER COUNTER =================
+    // ================= COUNTER =================
     if (data.startsWith("counter_user_")) {
       const offerId = data.split("_")[2];
-
       negotiationState[userId] = { offerId, role: "user" };
-
       return bot.sendMessage(userId, "Enter your price:");
     }
 
-    // ================= RUNNER COUNTER =================
     if (data.startsWith("counter_runner_")) {
       const offerId = data.split("_")[2];
-
       negotiationState[userId] = { offerId, role: "runner" };
-
       return bot.sendMessage(userId, "Enter your price:");
     }
 
@@ -246,24 +262,19 @@ bot.on("callback_query", async (query) => {
         .eq("id", offerId)
         .maybeSingle();
 
-      const finalPrice = offer.current_price;
+      await supabase.from("orders").update({
+        status: "assigned",
+        agreed_price: offer.current_price,
+        runner_id: offer.runner_id
+      }).eq("id", Number(offer.order_id));
 
-      await bot.sendMessage(
-        userId,
-        `✅ Deal accepted at ₦${finalPrice}`
-      );
-
-      await bot.sendMessage(
-        offer.runner_id,
-        `🎉 Your offer was accepted!\n💰 ₦${finalPrice}`
-      );
+      await bot.sendMessage(offer.user_id, `✅ Accepted ₦${offer.current_price}`);
+      await bot.sendMessage(offer.runner_id, `🎉 You got it! ₦${offer.current_price}`);
     }
 
     // ================= REJECT =================
     if (data.startsWith("reject_")) {
-      const offerId = data.split("_")[1];
-
-      await bot.sendMessage(userId, "❌ Offer rejected");
+      return bot.sendMessage(userId, "❌ Offer rejected");
     }
 
   } catch (err) {
