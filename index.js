@@ -15,7 +15,7 @@ const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 const negotiationState = {};
 const broadcastState = {};
 
-const ADMIN_ID = 5058917687; // 🔥 replace with your Telegram ID
+const ADMIN_ID = 123456789; // 🔥 replace with your Telegram ID
 
 console.log("🚀 Helply Running");
 
@@ -45,7 +45,26 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id;
   const text = msg.text.trim();
 
-  // 🔥 SAVE USER
+  // ================= CHECK EXISTING USER =================
+  const { data: existingUser } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", userId.toString())
+    .maybeSingle();
+
+  // ================= ONBOARDING =================
+  if (!existingUser) {
+    const { data: onboardingMessages } = await supabase
+      .from("broadcasts")
+      .select("*")
+      .eq("type", "onboarding");
+
+    for (const msgData of onboardingMessages) {
+      await bot.sendMessage(userId, msgData.message);
+    }
+  }
+
+  // ================= SAVE USER =================
   await supabase.from("users").upsert([{
     id: userId.toString(),
     banned: false
@@ -56,6 +75,12 @@ bot.on("message", async (msg) => {
   // ================= BROADCAST =================
   if (broadcastState[userId]) {
     const message = text;
+
+    await supabase.from("broadcasts").insert([{
+      message,
+      type: "normal",
+      created_at: new Date()
+    }]);
 
     const { data: users } = await supabase
       .from("users")
