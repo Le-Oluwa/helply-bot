@@ -2,6 +2,8 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
+const axios = require("axios");
+const express = require("express");
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
@@ -10,14 +12,57 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+const app = express();
+app.use(express.json());
+
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
+const ADMIN_ID = 123456789;
+const FLW_SECRET_KEY = process.env.FLW_SECRET_KEY;
 
 const negotiationState = {};
 const broadcastState = {};
 
-const ADMIN_ID = 123456789;
-
 console.log("🚀 Helply Running");
+
+
+// ================= FEE =================
+function calculateTotal(price) {
+  const platformFee = Math.ceil(price * 0.1);
+  const flwFee = Math.ceil(price * 0.015);
+  const total = price + platformFee + flwFee;
+  return { platformFee, flwFee, total };
+}
+
+
+// ================= PAYMENT =================
+async function createPaymentLink(amount, tx_ref) {
+  try {
+    const res = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
+      {
+        tx_ref,
+        amount,
+        currency: "NGN",
+        redirect_url: "https://example.com",
+        customer: { email: "user@email.com", name: "Helply User" },
+        customizations: {
+          title: "Helply Payment",
+          description: "Task payment"
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${FLW_SECRET_KEY}`
+        }
+      }
+    );
+
+    return res.data.data.link;
+  } catch (err) {
+    console.log("FLW ERROR:", err.response?.data || err.message);
+    return null;
+  }
+}
 
 
 // ================= START =================
@@ -59,20 +104,6 @@ Do you accept?`,
 });
 
 
-// ================= ADMIN =================
-bot.onText(/\/admin/, async (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
-
-  await bot.sendMessage(msg.from.id, "📊 Admin Dashboard", {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "📢 Broadcast", callback_data: "admin_broadcast" }]
-      ]
-    }
-  });
-});
-
-
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
@@ -80,46 +111,53 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id;
   const text = msg.text.trim();
 
-  // ================= CHECK USER =================
-  const { data: user } = await supabase
+  // ================= FETCH USER =================
+  let { data: user } = await supabase
     .from("users")
     .select("*")
     .eq("id", userId.toString())
     .maybeSingle();
 
-  // 🚫 BLOCK IF TERMS NOT ACCEPTED
-  if (!user?.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Use /start to accept terms first.");
+  // ================= HANDLE FIRST TIME USER =================
+  if (!user) {
+    await supabase.from("users").insert([{
+      id: userId.toString(),
+      accepted_terms: false,
+      banned: false
+    }]);
+
+    return bot.sendMessage(
+      userId,
+      "⚠️ Please type /start and accept the terms first."
+    );
   }
 
-  // ================= SAVE USER =================
-  await supabase.from("users").upsert([{
-    id: userId.toString(),
-    banned: false,
-    accepted_terms: true
-  }]);
+  // ================= BLOCK IF NOT ACCEPTED =================
+  if (user.accepted_terms === false) {
+    return bot.sendMessage(
+      userId,
+      "⚠️ Please use /start and accept the terms first."
+    );
+  }
 
   if (text.startsWith("/")) return;
 
   // ================= BROADCAST =================
   if (broadcastState[userId]) {
-    const { data: users } = await supabase
-      .from("users")
-      .select("id");
+    const { data: users } = await supabase.from("users").select("id");
 
-    let success = 0;
+    let count = 0;
 
     for (const u of users) {
       try {
         await bot.sendMessage(u.id, text);
-        success++;
+        count++;
         await new Promise(r => setTimeout(r, 50));
       } catch {}
     }
 
     delete broadcastState[userId];
-
-    return bot.sendMessage(userId, `✅ Sent to ${success} users`);
+    return bot.sendMessage(userId, `✅ Sent to ${count} users`);
   }
 
   // ================= NEGOTIATION =================
@@ -139,11 +177,9 @@ bot.on("message", async (msg) => {
     }).eq("id", offerId);
 
     if (role === "user") {
-      await bot.sendMessage(offer.runner_id,
-        `💬 Customer countered: ₦${price}`);
+      await bot.sendMessage(offer.runner_id, `💬 ₦${price}`);
     } else {
-      await bot.sendMessage(offer.user_id,
-        `💬 Runner countered: ₦${price}`);
+      await bot.sendMessage(offer.user_id, `💬 ₦${price}`);
     }
 
     delete negotiationState[userId];
@@ -164,7 +200,7 @@ bot.on("message", async (msg) => {
 
   bot.sendMessage(
     RUNNER_GROUP_ID,
-    `🚨 NEW TASK\n🆔 ${taskId}\n${text}`,
+    `🚨 NEW REQUEST\n🆔 ${taskId}\n📌 ${text}`,
     {
       reply_markup: {
         inline_keyboard: [
@@ -177,135 +213,130 @@ bot.on("message", async (msg) => {
 
 
 // ================= CALLBACK =================
-bot.on("callback_query", async (query) => {
-  const data = query.data;
-  const userId = query.from.id;
+bot.on("callback_query", async (q) => {
+  const data = q.data;
+  const userId = q.from.id;
 
+  // ===== ACCEPT TERMS =====
+  if (data === "accept_terms") {
+    await supabase.from("users").upsert([{
+      id: userId.toString(),
+      accepted_terms: true,
+      banned: false
+    }]);
+
+    return bot.sendMessage(
+      userId,
+      "✅ You can now use Helply!\n\nSend your request."
+    );
+  }
+
+  // ===== DECLINE =====
+  if (data === "decline_terms") {
+    return bot.sendMessage(userId, "❌ You must accept to continue.");
+  }
+
+  // ===== ADMIN BROADCAST =====
+  if (data === "admin_broadcast") {
+    broadcastState[userId] = true;
+    return bot.sendMessage(userId, "📢 Type message:");
+  }
+
+  // ===== OFFER =====
+  if (data.startsWith("offer_")) {
+    const [_, taskId, price] = data.split("_");
+
+    return bot.sendMessage(userId, `₦${price}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "+100", callback_data: `price_${taskId}_${+price+100}` }],
+          [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
+        ]
+      }
+    });
+  }
+
+  // ===== SUBMIT OFFER =====
+  if (data.startsWith("submit_")) {
+    const [_, taskId, price] = data.split("_");
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", Number(taskId))
+      .maybeSingle();
+
+    await supabase.from("offers").insert([{
+      id: uuidv4(),
+      order_id: String(taskId),
+      user_id: order.user_id,
+      runner_id: userId.toString(),
+      runner_name: q.from.first_name,
+      current_price: Number(price),
+      last_actor: "runner"
+    }]);
+
+    return bot.sendMessage(order.user_id, "💰 Offer received");
+  }
+
+  // ===== ACCEPT + PAYMENT =====
+  if (data.startsWith("accept_")) {
+    const id = data.split("_")[1];
+
+    const { data: o } = await supabase
+      .from("offers")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    const { platformFee, total } = calculateTotal(o.current_price);
+
+    const tx_ref = `tx_${o.order_id}_${Date.now()}`;
+
+    await supabase.from("orders").update({
+      agreed_price: o.current_price,
+      platform_fee: platformFee,
+      total_price: total,
+      runner_id: o.runner_id,
+      status: "pending_payment"
+    }).eq("id", Number(o.order_id));
+
+    const link = await createPaymentLink(total, tx_ref);
+
+    return bot.sendMessage(userId, `💳 Pay ₦${total}\n${link}`);
+  }
+});
+
+
+// ================= WEBHOOK =================
+app.post("/flutterwave/webhook", async (req, res) => {
   try {
+    const data = req.body.data;
 
-    // ===== TERMS =====
-    if (data === "accept_terms") {
-      await supabase.from("users").upsert([{
-        id: userId.toString(),
-        accepted_terms: true,
-        banned: false
-      }]);
-
-      return bot.sendMessage(userId, "✅ You can now use Helply!");
-    }
-
-    if (data === "decline_terms") {
-      return bot.sendMessage(userId, "❌ You must accept terms.");
-    }
-
-    // ===== ADMIN BROADCAST =====
-    if (data === "admin_broadcast") {
-      broadcastState[userId] = true;
-      return bot.sendMessage(userId, "📢 Type message:");
-    }
-
-    // ===== OFFER FLOW =====
-    if (data.startsWith("offer_")) {
-      const [_, taskId, price] = data.split("_");
-
-      return bot.sendMessage(userId, `₦${price}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "+100", callback_data: `price_${taskId}_${+price+100}` }],
-            [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
-          ]
-        }
-      });
-    }
-
-    if (data.startsWith("submit_")) {
-      const [_, taskId, price] = data.split("_");
+    if (data?.status === "successful") {
+      const orderId = data.tx_ref.split("_")[1];
 
       const { data: order } = await supabase
         .from("orders")
         .select("*")
-        .eq("id", Number(taskId))
+        .eq("id", Number(orderId))
         .maybeSingle();
 
-      await supabase.from("offers").insert([{
-        id: uuidv4(),
-        order_id: String(taskId),
-        user_id: order.user_id,
-        runner_id: userId.toString(),
-        runner_name: query.from.first_name,
-        current_price: Number(price),
-        last_actor: "runner"
-      }]);
+      await supabase.from("orders").update({
+        status: "paid"
+      }).eq("id", Number(orderId));
 
-      const { data: offers } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("order_id", String(taskId));
-
-      const buttons = offers.map(o => [{
-        text: `${o.runner_name} ₦${o.current_price}`,
-        callback_data: `view_${o.id}`
-      }]);
-
-      return bot.sendMessage(order.user_id, "Offers:", {
-        reply_markup: { inline_keyboard: buttons }
-      });
+      await bot.sendMessage(order.user_id, "✅ Payment confirmed!");
+      await bot.sendMessage(order.runner_id, "💰 Proceed!");
     }
 
-    // ===== VIEW =====
-    if (data.startsWith("view_")) {
-      const id = data.split("_")[1];
-
-      const { data: o } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-
-      return bot.sendMessage(userId,
-        `${o.runner_name} ₦${o.current_price}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "Accept", callback_data: `accept_${id}` }],
-              [{ text: "Counter", callback_data: `counter_user_${id}` }]
-            ]
-          }
-        });
-    }
-
-    // ===== COUNTER =====
-    if (data.startsWith("counter_user_")) {
-      negotiationState[userId] = {
-        offerId: data.split("_")[2],
-        role: "user"
-      };
-      return bot.sendMessage(userId, "Enter price:");
-    }
-
-    if (data.startsWith("counter_runner_")) {
-      negotiationState[userId] = {
-        offerId: data.split("_")[2],
-        role: "runner"
-      };
-      return bot.sendMessage(userId, "Enter price:");
-    }
-
-    // ===== ACCEPT =====
-    if (data.startsWith("accept_")) {
-      const id = data.split("_")[1];
-
-      const { data: o } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-
-      await bot.sendMessage(o.user_id, "✅ Accepted!");
-      await bot.sendMessage(o.runner_id, "🎉 You got it!");
-    }
-
+    res.sendStatus(200);
   } catch (err) {
-    console.log("ERROR:", err.message);
+    console.log("Webhook error:", err.message);
+    res.sendStatus(500);
   }
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Server running...");
 });
