@@ -13,25 +13,37 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 
 const negotiationState = {};
-const broadcastState = {};
 
 console.log("🚀 Helply Running");
 
 
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
-  const userId = msg.from.id;
+  const userId = msg.from.id.toString();
 
-  const { data: user } = await supabase
+  let { data: user } = await supabase
     .from("users")
     .select("*")
-    .eq("id", userId.toString())
+    .eq("id", userId)
     .maybeSingle();
 
-  if (user?.accepted_terms) {
+  // ✅ Create user if not exists
+  if (!user) {
+    await supabase.from("users").insert([{
+      id: userId,
+      accepted_terms: false,
+      banned: false
+    }]);
+
+    user = { accepted_terms: false };
+  }
+
+  // ✅ Already accepted
+  if (user.accepted_terms === true) {
     return bot.sendMessage(userId, "👋 Welcome back to Helply!");
   }
 
+  // ✅ Show terms
   return bot.sendMessage(
     userId,
 `👋 Welcome to Helply!
@@ -41,7 +53,7 @@ bot.onText(/\/start/, async (msg) => {
 • Provide accurate requests  
 • No illegal use  
 • Be respectful  
-• No bypass  
+• No bypass Helply  
 
 Do you accept?`,
     {
@@ -60,18 +72,19 @@ Do you accept?`,
 bot.on("message", async (msg) => {
   if (!msg.text) return;
 
-  const userId = msg.from.id;
+  const userId = msg.from.id.toString();
   const text = msg.text.trim();
 
   let { data: user } = await supabase
     .from("users")
     .select("*")
-    .eq("id", userId.toString())
+    .eq("id", userId)
     .maybeSingle();
 
+  // ✅ Create user if not exists
   if (!user) {
     await supabase.from("users").insert([{
-      id: userId.toString(),
+      id: userId,
       accepted_terms: false,
       banned: false
     }]);
@@ -79,7 +92,8 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "⚠️ Use /start first.");
   }
 
-  if (user.accepted_terms === false) {
+  // ✅ STRICT CHECK (FIXED)
+  if (user.accepted_terms !== true) {
     return bot.sendMessage(userId, "⚠️ Accept terms first.");
   }
 
@@ -116,7 +130,7 @@ bot.on("message", async (msg) => {
 
   await supabase.from("orders").insert([{
     id: taskId,
-    user_id: userId.toString(),
+    user_id: userId,
     delivery_location: text,
     status: "open"
   }]);
@@ -140,19 +154,23 @@ bot.on("message", async (msg) => {
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
   const data = q.data;
-  const userId = q.from.id;
+  const userId = q.from.id.toString();
 
   try {
 
     // ===== ACCEPT TERMS =====
     if (data === "accept_terms") {
       await supabase.from("users").upsert([{
-        id: userId.toString(),
+        id: userId,
         accepted_terms: true,
         banned: false
       }]);
 
       return bot.sendMessage(userId, "✅ You can now use Helply!");
+    }
+
+    if (data === "decline_terms") {
+      return bot.sendMessage(userId, "❌ You must accept terms to use Helply.");
     }
 
     // ===== OFFER START =====
@@ -165,8 +183,8 @@ bot.on("callback_query", async (q) => {
         .eq("id", Number(taskId))
         .maybeSingle();
 
-      // 🔥 Prevent self-tasking
-      if (order.user_id === userId.toString()) {
+      // 🚫 Prevent self-tasking
+      if (order.user_id === userId) {
         return bot.answerCallbackQuery(q.id, {
           text: "❌ You cannot run your own task",
           show_alert: true
@@ -225,7 +243,7 @@ bot.on("callback_query", async (q) => {
         .eq("id", Number(taskId))
         .maybeSingle();
 
-      if (order.user_id === userId.toString()) {
+      if (order.user_id === userId) {
         return bot.answerCallbackQuery(q.id, {
           text: "❌ You cannot run your own task",
           show_alert: true
@@ -236,7 +254,7 @@ bot.on("callback_query", async (q) => {
         id: uuidv4(),
         order_id: String(taskId),
         user_id: order.user_id,
-        runner_id: userId.toString(),
+        runner_id: userId,
         runner_name: q.from.first_name,
         current_price: Number(price),
         last_actor: "runner"
