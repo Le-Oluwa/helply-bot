@@ -136,21 +136,26 @@ app.get("/create-payment", async (req, res) => {
     const tx_ref = `tx_${orderId}_${Date.now()}`;
 
     const response = await axios.post(
-      "https://api.flutterwave.com/v3/payments",
-      {
-        tx_ref,
-        amount,
-        currency: "NGN",
-        redirect_url: "https://google.com",
-        customer: {
-          email: "user@helply.com",
-          name: "Helply User"
-        },
-        customizations: {
-          title: "Helply Payment",
-          description: "Task payment"
-        }
-      },
+  "https://api.flutterwave.com/v3/payments",
+  {
+    tx_ref,
+    amount,
+    currency: "NGN",
+    redirect_url: "https://flutterwave.com",
+
+    // 🔥 ENABLE MULTIPLE PAYMENT METHODS
+    payment_options: "card,banktransfer,ussd",
+
+    customer: {
+      email: "user@helply.com",
+      name: "Helply User"
+    },
+
+    customizations: {
+      title: "Helply Payment",
+      description: "Task payment"
+    }
+  },
       {
         headers: {
           Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
