@@ -20,17 +20,13 @@ app.get("/", (req, res) => {
 });
 
 // ================= CREATE PAYMENT =================
-app.post("/create-payment", async (req, res) => {
+app.get("/create-payment", async (req, res) => {
   try {
-    const { orderId, amount } = req.body;
+    const orderId = req.query.orderId;
+    const amount = req.query.amount;
 
     if (!orderId || !amount) {
-      return res.status(400).json({ error: "Missing orderId or amount" });
-    }
-
-    if (!process.env.FLW_SECRET_KEY) {
-      console.error("❌ Missing FLW_SECRET_KEY");
-      return res.status(500).json({ error: "Server not configured" });
+      return res.status(400).send("Missing orderId or amount");
     }
 
     const tx_ref = `tx_${orderId}_${Date.now()}`;
@@ -39,13 +35,20 @@ app.post("/create-payment", async (req, res) => {
       "https://api.flutterwave.com/v3/payments",
       {
         tx_ref,
-        amount,
+        amount: Number(amount), // 🔥 important
         currency: "NGN",
-        redirect_url: "https://google.com",
+
+        // 🔥 VERY IMPORTANT (must be a real reachable URL)
+        redirect_url: "https://www.google.com",
+
+        payment_options: "card,banktransfer",
+
         customer: {
-          email: "user@helply.com",
-          name: "Helply User"
+          email: "test@helply.com",
+          phonenumber: "08000000000",
+          name: "Test User"
         },
+
         customizations: {
           title: "Helply Payment",
           description: "Task payment"
@@ -59,13 +62,12 @@ app.post("/create-payment", async (req, res) => {
       }
     );
 
-    return res.json({
-      link: response.data.data.link,
-      tx_ref
-    });
+    // 🔥 redirect user instead of returning JSON
+    return res.redirect(response.data.data.link);
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
+    console.error("❌ FULL ERROR:", err.response?.data || err.message);
+
     return res.status(500).json({
       error: "Payment failed",
       details: err.response?.data || err.message
