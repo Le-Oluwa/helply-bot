@@ -7,6 +7,7 @@ app.use(express.json());
 
 // 🔥 DEBUG LOGS
 console.log("🚀 SERVER STARTING...");
+console.log("FLW KEY START:", process.env.FLW_SECRET_KEY?.slice(0, 15));
 console.log("PORT:", process.env.PORT);
 console.log(
   "FLW KEY:",
