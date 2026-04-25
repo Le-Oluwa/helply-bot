@@ -28,13 +28,12 @@ app.get("/payment-success", async (req, res) => {
       return res.send("<h1>Missing transaction reference</h1>");
     }
 
-    // 🔍 Extract orderId from tx_ref
-    // format: order_123_171234567
+    // 🔍 Extract orderId
     const parts = tx_ref.split("_");
     const orderId = parts[1];
 
-    // 🔐 Verify payment from Flutterwave
-    const response = await axios.get(
+    // 🔐 Verify payment with Flutterwave
+    const verifyRes = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
       {
         headers: {
@@ -43,37 +42,76 @@ app.get("/payment-success", async (req, res) => {
       }
     );
 
-    const data = response.data;
+    const paymentData = verifyRes.data;
 
-    console.log("VERIFY RESPONSE:", data);
+    console.log("VERIFY RESPONSE:", paymentData);
 
-    // ✅ DOUBLE CHECK PAYMENT
+    // ❌ Payment not successful
     if (
-      data.status === "success" &&
-      data.data.status === "successful" &&
-      data.data.amount > 0
+      paymentData.status !== "success" ||
+      paymentData.data.status !== "successful"
     ) {
-
-      // 🔥 THIS IS WHERE YOUR BUSINESS LOGIC STARTS
-      console.log("✅ PAYMENT CONFIRMED FOR ORDER:", orderId);
-
-      // 👉 later: save to DB here
-      // 👉 later: notify runners here
-
-      return res.send(`
-        <h1>✅ Payment Successful</h1>
-        <p>Order ID: ${orderId}</p>
-        <p>Amount: ₦${data.data.amount}</p>
-        <p>Reference: ${data.data.tx_ref}</p>
-        <p>🚀 Your task is now live!</p>
-      `);
-
-    } else {
       return res.send(`
         <h1>❌ Payment Not Completed</h1>
         <p>Status: ${status || "unknown"}</p>
       `);
     }
+
+    // 🔍 Fetch order from DB
+    const { data: order, error: fetchError } = await supabase
+      .from("orders")
+      .select("id, agreed_price, payment_status")
+      .eq("id", orderId)
+      .single();
+
+    if (fetchError || !order) {
+      console.error("❌ ORDER FETCH ERROR:", fetchError);
+      return res.send("<h1>Order not found</h1>");
+    }
+
+    // 🛑 Prevent double payment processing
+    if (order.payment_status === "paid") {
+      return res.send(`
+        <h1>✅ Already Paid</h1>
+        <p>Order ID: ${orderId}</p>
+      `);
+    }
+
+    // 🔥 SECURITY CHECK (VERY IMPORTANT)
+    if (Number(paymentData.data.amount) !== Number(order.agreed_price)) {
+      console.error("❌ AMOUNT MISMATCH");
+
+      return res.send(`
+        <h1>❌ Payment Error</h1>
+        <p>Amount mismatch detected</p>
+      `);
+    }
+
+    // ✅ UPDATE ORDER
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "paid",
+        status: "paid"
+      })
+      .eq("id", orderId);
+
+    if (updateError) {
+      console.error("❌ DB UPDATE ERROR:", updateError);
+      return res.send("<h1>Error updating order</h1>");
+    }
+
+    console.log("✅ ORDER UPDATED:", orderId);
+
+    // 🚀 READY FOR RUNNERS (next step)
+    console.log("🚀 SEND TO RUNNERS:", orderId);
+
+    return res.send(`
+      <h1>✅ Payment Successful</h1>
+      <p>Order ID: ${orderId}</p>
+      <p>Amount: ₦${paymentData.data.amount}</p>
+      <p>🚀 Your task is now live!</p>
+    `);
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
