@@ -86,3 +86,39 @@ console.log("FINAL PORT:", PORT);
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
+
+
+// ================= VERIFY PAYMENT =================
+app.get("/verify-payment/:tx_ref", async (req, res) => {
+  try {
+    const { tx_ref } = req.params;
+
+    const response = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`
+        }
+      }
+    );
+
+    const data = response.data;
+
+    if (data.status === "success" && data.data.status === "successful") {
+      return res.json({
+        success: true,
+        message: "Payment verified",
+        data: data.data
+      });
+    } else {
+      return res.json({
+        success: false,
+        message: "Payment not successful"
+      });
+    }
+
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
+    return res.status(500).json({ error: "Verification failed" });
+  }
+});
