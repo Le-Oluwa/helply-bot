@@ -21,6 +21,11 @@ app.post("/create-payment", async (req, res) => {
       return res.status(400).json({ error: "Missing orderId or amount" });
     }
 
+    if (!process.env.FLW_SECRET_KEY) {
+      console.error("❌ Missing FLW_SECRET_KEY");
+      return res.status(500).json({ error: "Server not configured" });
+    }
+
     const tx_ref = `tx_${orderId}_${Date.now()}`;
 
     const response = await axios.post(
@@ -54,7 +59,10 @@ app.post("/create-payment", async (req, res) => {
 
   } catch (err) {
     console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ error: "Payment failed" });
+    return res.status(500).json({
+      error: "Payment failed",
+      details: err.response?.data || err.message
+    });
   }
 });
 
@@ -65,7 +73,7 @@ app.post("/webhook", (req, res) => {
 });
 
 // ================= START SERVER =================
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
