@@ -5,7 +5,13 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
+// 🔥 FORCE LOGS (IMPORTANT)
 console.log("🚀 SERVER STARTING...");
+console.log("PORT:", process.env.PORT);
+console.log(
+  "FLW KEY:",
+  process.env.FLW_SECRET_KEY ? "Loaded ✅" : "Missing ❌"
+);
 
 // ================= HEALTH CHECK =================
 app.get("/", (req, res) => {
