@@ -126,19 +126,18 @@ app.get("/payment-success", async (req, res) => {
 // ================= PAYMENT SUCCESS =================
 app.get("/payment-success", async (req, res) => {
   try {
-    const { tx_ref } = req.query;
+    const { tx_ref, status } = req.query;
 
     if (!tx_ref) {
       return res.send("<h1>Missing tx_ref</h1>");
     }
 
-    // 🔍 Extract orderId from tx_ref
-    // format: order_12345_171234567
+    // 🔍 Extract orderId
     const parts = tx_ref.split("_");
     const orderId = parts[1];
 
     // 🔐 Verify payment
-    const response = await axios.get(
+    const verifyRes = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
       {
         headers: {
@@ -147,43 +146,89 @@ app.get("/payment-success", async (req, res) => {
       }
     );
 
-    const data = response.data;
+    const paymentData = verifyRes.data;
 
-    console.log("VERIFY RESPONSE:", data);
+    console.log("VERIFY RESPONSE:", paymentData);
 
-    // ✅ PAYMENT SUCCESS
+    // ❌ If payment not successful
     if (
-      data.status === "success" &&
-      data.data.status === "successful"
+      paymentData.status !== "success" ||
+      paymentData.data.status !== "successful"
     ) {
-
-      // 🔥 UPDATE EXISTING ORDER (NOT INSERT)
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          payment_status: "paid",
-          status: "paid" // optional
-        })
-        .eq("id", orderId);
-
-      if (error) {
-        console.error("❌ DB UPDATE ERROR:", error);
-      } else {
-        console.log("✅ ORDER UPDATED:", orderId);
-      }
-
-      return res.send(`
-        <h1>✅ Payment Successful</h1>
-        <p>Order ID: ${orderId}</p>
-        <p>Amount: ₦${data.data.amount}</p>
-        <p>🚀 Task is now active</p>
-      `);
-
-    } else {
       return res.send(`
         <h1>❌ Payment Not Completed</h1>
+        <p>Status: ${status || "unknown"}</p>
       `);
     }
+
+    // 🔍 Fetch order from DB
+    const { data: order, error: fetchError } = await supabase
+      .from("orders")
+      .select("id, agreed_price, payment_status")
+      .eq("id", orderId)
+      .single();
+
+    if (fetchError || !order) {
+      console.error("❌ ORDER FETCH ERROR:", fetchError);
+      return res.send("<h1>Order not found</h1>");
+    }
+
+    // 🛑 Prevent double processing
+    if (order.payment_status === "paid") {
+      return res.send(`
+        <h1>✅ Already Paid</h1>
+        <p>Order ID: ${orderId}</p>
+      `);
+    }
+
+    // 🔥 SECURITY: amount must match agreed_price
+    if (
+      Number(paymentData.data.amount) !== Number(order.agreed_price)
+    ) {
+      console.error("❌ AMOUNT MISMATCH");
+
+      return res.send(`
+        <h1>❌ Payment Error</h1>
+        <p>Amount mismatch detected</p>
+      `);
+    }
+
+    // ✅ Update order
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "paid",
+        status: "paid"
+      })
+      .eq("id", orderId);
+
+    if (updateError) {
+      console.error("❌ DB UPDATE ERROR:", updateError);
+      return res.send("<h1>Error updating order</h1>");
+    }
+
+    console.log("✅ ORDER UPDATED:", orderId);
+
+    // 🚀 SEND TO RUNNERS (THIS IS THE BIG STEP)
+    await bot.sendMessage(
+      process.env.RUNNER_CHAT_ID,
+      `🚀 NEW TASK AVAILABLE
+
+🆔 Order: ${orderId}
+💰 Price: ₦${paymentData.data.amount}
+
+Reply with:
+accept ${orderId}`
+    );
+
+    console.log("📢 SENT TO RUNNERS:", orderId);
+
+    return res.send(`
+      <h1>✅ Payment Successful</h1>
+      <p>Order ID: ${orderId}</p>
+      <p>Amount: ₦${paymentData.data.amount}</p>
+      <p>🚀 Your task is now live!</p>
+    `);
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
