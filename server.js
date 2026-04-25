@@ -20,6 +20,7 @@ const bot = new TelegramBot(process.env.BOT_TOKEN);
 console.log("🚀 SERVER STARTING...");
 console.log("FLW KEY:", process.env.FLW_SECRET_KEY ? "Loaded ✅" : "Missing ❌");
 
+
 // ================= HEALTH =================
 app.get("/", (req, res) => {
   res.send("💰 Helply Backend Running");
@@ -35,10 +36,10 @@ app.get("/create-payment", async (req, res) => {
       return res.send("Missing orderId");
     }
 
-    // 🔥 GET FULL ORDER
+    // 🔥 Fetch order
     const { data: order, error } = await supabase
       .from("orders")
-      .select("id, total_price")
+      .select("id, agreed_price, total_price")
       .eq("id", orderId)
       .single();
 
@@ -46,18 +47,40 @@ app.get("/create-payment", async (req, res) => {
       return res.send("Order not found");
     }
 
+    // 🔥 SAFETY FIX (VERY IMPORTANT)
+    let amount = Number(order.total_price);
+
+    // fallback if total_price missing
+    if (!amount || amount <= 0) {
+      console.log("⚠️ total_price missing, recalculating...");
+      const agreed = Number(order.agreed_price);
+
+      if (!agreed || agreed <= 0) {
+        return res.send("Invalid order amount. Recreate order.");
+      }
+
+      amount = Math.ceil(agreed * 1.05); // 🔥 5% fee
+
+      // optional: update DB so it doesn't break again
+      await supabase
+        .from("orders")
+        .update({ total_price: amount })
+        .eq("id", orderId);
+    }
+
+    console.log("💰 CHARGING:", amount);
+
     const tx_ref = `order_${orderId}_${Date.now()}`;
 
     const response = await axios.post(
       "https://api.flutterwave.com/v3/payments",
       {
         tx_ref,
-        amount: Number(order.total_price), // ✅ FIXED
+        amount,
         currency: "NGN",
         redirect_url:
           "https://courageous-connection-production-3317.up.railway.app/payment-success",
-
-        payment_options: "card,banktransfer",
+        payment_options: "card,banktransfer,ussd",
 
         customer: {
           email: "user@helply.com",
@@ -81,7 +104,7 @@ app.get("/create-payment", async (req, res) => {
 
   } catch (err) {
     console.error("❌ PAYMENT ERROR:", err.response?.data || err.message);
-    res.send("Error creating payment");
+    return res.send("Error creating payment");
   }
 });
 
@@ -95,11 +118,9 @@ app.get("/payment-success", async (req, res) => {
       return res.send("<h1>Missing tx_ref</h1>");
     }
 
-    // 🔍 Extract orderId
-    const parts = tx_ref.split("_");
-    const orderId = parts[1];
+    const orderId = tx_ref.split("_")[1];
 
-    // 🔐 Verify payment
+    // 🔐 VERIFY
     const verifyRes = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
       {
@@ -113,46 +134,41 @@ app.get("/payment-success", async (req, res) => {
 
     console.log("VERIFY RESPONSE:", paymentData);
 
-    // ❌ Payment failed
     if (
       paymentData.status !== "success" ||
       paymentData.data.status !== "successful"
     ) {
-      return res.send(`
-        <h1>❌ Payment Not Completed</h1>
-        <p>Status: ${status || "unknown"}</p>
-      `);
+      return res.send(`<h1>❌ Payment Not Completed</h1>`);
     }
 
-    // 🔍 Fetch order
-    const { data: order, error: fetchError } = await supabase
+    // 🔍 GET ORDER
+    const { data: order } = await supabase
       .from("orders")
       .select("id, total_price, payment_status, runner_id, user_id")
       .eq("id", orderId)
       .single();
 
-    if (fetchError || !order) {
+    if (!order) {
       return res.send("<h1>Order not found</h1>");
     }
 
-    // 🛑 Prevent duplicate processing
     if (order.payment_status === "paid") {
       return res.send("<h1>Already paid</h1>");
     }
 
-    // 🛑 Ensure runner exists
     if (!order.runner_id) {
       return res.send("<h1>No runner assigned</h1>");
     }
 
-    // 🔥 FIXED AMOUNT CHECK
+    // 🔥 STRICT CHECK
     if (
       Number(paymentData.data.amount) !== Number(order.total_price)
     ) {
+      console.log("❌ AMOUNT MISMATCH:", paymentData.data.amount, order.total_price);
       return res.send("<h1>Amount mismatch</h1>");
     }
 
-    // ✅ Update order
+    // ✅ UPDATE ORDER
     await supabase
       .from("orders")
       .update({
@@ -163,18 +179,16 @@ app.get("/payment-success", async (req, res) => {
 
     console.log("✅ ORDER UPDATED:", orderId);
 
-    // 🔓 UNLOCK CHAT
-
+    // 🔓 NOTIFY RUNNER
     await bot.sendMessage(
       order.runner_id,
       `💰 Payment Confirmed!
 
 🆔 Order: ${orderId}
-💵 Amount: ₦${paymentData.data.amount}
-
 🚀 Start the task.`
     );
 
+    // 🔓 NOTIFY USER
     await bot.sendMessage(
       order.user_id,
       `✅ Payment Successful!
