@@ -5,7 +5,7 @@ const axios = require("axios");
 const app = express();
 app.use(express.json());
 
-// 🔥 FORCE LOGS (IMPORTANT)
+// 🔥 DEBUG LOGS
 console.log("🚀 SERVER STARTING...");
 console.log("PORT:", process.env.PORT);
 console.log(
@@ -15,7 +15,7 @@ console.log(
 
 // ================= HEALTH CHECK =================
 app.get("/", (req, res) => {
-  res.send("💰 Payment server running");
+  res.status(200).send("💰 Payment server running");
 });
 
 // ================= CREATE PAYMENT =================
@@ -81,6 +81,7 @@ app.post("/webhook", (req, res) => {
 // ================= START SERVER =================
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+// 🔥 IMPORTANT: bind to 0.0.0.0
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
