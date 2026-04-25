@@ -91,9 +91,15 @@ app.get("/payment-success", async (req, res) => {
     const { tx_ref } = req.query;
 
     if (!tx_ref) {
-      return res.send("Missing tx_ref");
+      return res.send("<h1>Missing tx_ref</h1>");
     }
 
+    // 🔍 Extract orderId from tx_ref
+    // format: order_12345_171234567
+    const parts = tx_ref.split("_");
+    const orderId = parts[1];
+
+    // 🔐 Verify payment
     const response = await axios.get(
       `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
       {
@@ -107,12 +113,34 @@ app.get("/payment-success", async (req, res) => {
 
     console.log("VERIFY RESPONSE:", data);
 
-    if (data.status === "success" && data.data.status === "successful") {
+    // ✅ PAYMENT SUCCESS
+    if (
+      data.status === "success" &&
+      data.data.status === "successful"
+    ) {
+
+      // 🔥 UPDATE EXISTING ORDER (NOT INSERT)
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          payment_status: "paid",
+          status: "paid" // optional
+        })
+        .eq("id", orderId);
+
+      if (error) {
+        console.error("❌ DB UPDATE ERROR:", error);
+      } else {
+        console.log("✅ ORDER UPDATED:", orderId);
+      }
+
       return res.send(`
         <h1>✅ Payment Successful</h1>
+        <p>Order ID: ${orderId}</p>
         <p>Amount: ₦${data.data.amount}</p>
-        <p>Reference: ${data.data.tx_ref}</p>
+        <p>🚀 Task is now active</p>
       `);
+
     } else {
       return res.send(`
         <h1>❌ Payment Not Completed</h1>
@@ -121,10 +149,12 @@ app.get("/payment-success", async (req, res) => {
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
-    res.send("<h1>Error verifying payment</h1>");
+
+    return res.send(`
+      <h1>⚠️ Error verifying payment</h1>
+    `);
   }
 });
-
 // ================= VERIFY PAYMENT (OPTIONAL API) =================
 app.get("/verify-payment/:tx_ref", async (req, res) => {
   try {
