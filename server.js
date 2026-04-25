@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
-console.log("SUPABASE URL:", process.env.SUPABASE_URL);
 const TelegramBot = require("node-telegram-bot-api");
 
 const app = express();
@@ -26,6 +25,7 @@ app.get("/", (req, res) => {
   res.send("💰 Helply Backend Running");
 });
 
+
 // ================= CREATE PAYMENT =================
 app.get("/create-payment", async (req, res) => {
   try {
@@ -35,10 +35,10 @@ app.get("/create-payment", async (req, res) => {
       return res.send("Missing orderId");
     }
 
-    // 🔍 Fetch order price from DB (secure)
+    // 🔥 GET FULL ORDER
     const { data: order, error } = await supabase
       .from("orders")
-      .select("agreed_price")
+      .select("id, total_price")
       .eq("id", orderId)
       .single();
 
@@ -52,7 +52,7 @@ app.get("/create-payment", async (req, res) => {
       "https://api.flutterwave.com/v3/payments",
       {
         tx_ref,
-        amount: Number(order.agreed_price),
+        amount: Number(order.total_price), // ✅ FIXED
         currency: "NGN",
         redirect_url:
           "https://courageous-connection-production-3317.up.railway.app/payment-success",
@@ -61,7 +61,6 @@ app.get("/create-payment", async (req, res) => {
 
         customer: {
           email: "user@helply.com",
-          phonenumber: "08000000000",
           name: "Helply User"
         },
 
@@ -85,6 +84,7 @@ app.get("/create-payment", async (req, res) => {
     res.send("Error creating payment");
   }
 });
+
 
 // ================= PAYMENT SUCCESS =================
 app.get("/payment-success", async (req, res) => {
@@ -127,7 +127,7 @@ app.get("/payment-success", async (req, res) => {
     // 🔍 Fetch order
     const { data: order, error: fetchError } = await supabase
       .from("orders")
-      .select("id, agreed_price, payment_status, runner_id, user_id")
+      .select("id, total_price, payment_status, runner_id, user_id")
       .eq("id", orderId)
       .single();
 
@@ -145,9 +145,9 @@ app.get("/payment-success", async (req, res) => {
       return res.send("<h1>No runner assigned</h1>");
     }
 
-    // 🔐 Amount check
+    // 🔥 FIXED AMOUNT CHECK
     if (
-      Number(paymentData.data.amount) !== Number(order.agreed_price)
+      Number(paymentData.data.amount) !== Number(order.total_price)
     ) {
       return res.send("<h1>Amount mismatch</h1>");
     }
@@ -163,9 +163,8 @@ app.get("/payment-success", async (req, res) => {
 
     console.log("✅ ORDER UPDATED:", orderId);
 
-    // 🔓 UNLOCK DIRECT CHAT
+    // 🔓 UNLOCK CHAT
 
-    // notify runner
     await bot.sendMessage(
       order.runner_id,
       `💰 Payment Confirmed!
@@ -173,38 +172,30 @@ app.get("/payment-success", async (req, res) => {
 🆔 Order: ${orderId}
 💵 Amount: ₦${paymentData.data.amount}
 
-🚀 Contact the user and start the task.`
+🚀 Start the task.`
     );
 
-    // notify user
     await bot.sendMessage(
       order.user_id,
       `✅ Payment Successful!
 
 🆔 Order: ${orderId}
 
-🤝 You can now contact your runner directly.`
+🤝 You can now chat with your runner.`
     );
 
     return res.send(`
       <h1>✅ Payment Successful</h1>
       <p>Order ID: ${orderId}</p>
       <p>Amount: ₦${paymentData.data.amount}</p>
-      <p>🤝 You can now proceed with your runner</p>
     `);
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
-
     return res.send("<h1>Error verifying payment</h1>");
   }
 });
 
-// ================= WEBHOOK =================
-app.post("/webhook", (req, res) => {
-  console.log("🔔 WEBHOOK:", req.body);
-  res.sendStatus(200);
-});
 
 // ================= START =================
 app.listen(PORT, "0.0.0.0", () => {
