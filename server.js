@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const axios = require("axios");
 const { createClient } = require("@supabase/supabase-js");
+console.log("SUPABASE URL:", process.env.SUPABASE_URL);
 const TelegramBot = require("node-telegram-bot-api");
 
 const app = express();
