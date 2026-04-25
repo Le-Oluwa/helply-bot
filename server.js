@@ -124,3 +124,49 @@ app.get("/verify-payment/:tx_ref", async (req, res) => {
     return res.status(500).json({ error: "Verification failed" });
   }
 });
+// TEMP TEST ROUTE (FOR BROWSER)
+app.get("/create-payment", async (req, res) => {
+  try {
+    const { orderId, amount } = req.query;
+
+    if (!orderId || !amount) {
+      return res.send("Missing orderId or amount in query");
+    }
+
+    const tx_ref = `tx_${orderId}_${Date.now()}`;
+
+    const response = await axios.post(
+      "https://api.flutterwave.com/v3/payments",
+      {
+        tx_ref,
+        amount,
+        currency: "NGN",
+        redirect_url: "https://google.com",
+        customer: {
+          email: "user@helply.com",
+          name: "Helply User"
+        },
+        customizations: {
+          title: "Helply Payment",
+          description: "Task payment"
+        }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    return res.send(`
+      <h2>Payment Link</h2>
+      <a href="${response.data.data.link}" target="_blank">Pay Now</a>
+      <p>tx_ref: ${tx_ref}</p>
+    `);
+
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+    res.send("Error creating payment");
+  }
+});
