@@ -1,11 +1,11 @@
 {
   "name": "helply-bot",
   "version": "1.0.0",
-  "description": "Helply bot + payment server",
-  "main": "server.js",
+  "description": "",
+  "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node server.js"
+    "start": "node index.js"
   },
   "keywords": [],
   "author": "",
