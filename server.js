@@ -22,8 +22,7 @@ app.get("/", (req, res) => {
 // ================= CREATE PAYMENT =================
 app.get("/create-payment", async (req, res) => {
   try {
-    const orderId = req.query.orderId;
-    const amount = req.query.amount;
+    const { orderId, amount } = req.query;
 
     if (!orderId || !amount) {
       return res.status(400).send("Missing orderId or amount");
@@ -35,13 +34,14 @@ app.get("/create-payment", async (req, res) => {
       "https://api.flutterwave.com/v3/payments",
       {
         tx_ref,
-        amount: Number(amount), // 🔥 important
+        amount: Number(amount),
         currency: "NGN",
 
-        // 🔥 VERY IMPORTANT (must be a real reachable URL)
-        redirect_url: "https://www.google.com",
+        // ✅ FIXED: redirect back to your server
+        redirect_url:
+          "https://courageous-connection-production-3317.up.railway.app/payment-success",
 
-        payment_options: "card,banktransfer",
+        payment_options: "card,banktransfer,ussd",
 
         customer: {
           email: "test@helply.com",
@@ -51,7 +51,7 @@ app.get("/create-payment", async (req, res) => {
 
         customizations: {
           title: "Helply Payment",
-          description: "Task payment"
+          description: `Task payment for ${orderId}`
         }
       },
       {
@@ -62,7 +62,7 @@ app.get("/create-payment", async (req, res) => {
       }
     );
 
-    // 🔥 redirect user instead of returning JSON
+    // ✅ Redirect user to Flutterwave
     return res.redirect(response.data.data.link);
 
   } catch (err) {
@@ -72,6 +72,79 @@ app.get("/create-payment", async (req, res) => {
       error: "Payment failed",
       details: err.response?.data || err.message
     });
+  }
+});
+
+// ================= PAYMENT SUCCESS =================
+app.get("/payment-success", async (req, res) => {
+  try {
+    const { tx_ref } = req.query;
+
+    if (!tx_ref) {
+      return res.send("Missing tx_ref");
+    }
+
+    const response = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`
+        }
+      }
+    );
+
+    const data = response.data;
+
+    console.log("VERIFY RESPONSE:", data);
+
+    if (data.status === "success" && data.data.status === "successful") {
+      return res.send(`
+        <h1>✅ Payment Successful</h1>
+        <p>Amount: ₦${data.data.amount}</p>
+        <p>Reference: ${data.data.tx_ref}</p>
+      `);
+    } else {
+      return res.send(`
+        <h1>❌ Payment Not Completed</h1>
+      `);
+    }
+
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
+    res.send("<h1>Error verifying payment</h1>");
+  }
+});
+
+// ================= VERIFY PAYMENT (OPTIONAL API) =================
+app.get("/verify-payment/:tx_ref", async (req, res) => {
+  try {
+    const { tx_ref } = req.params;
+
+    const response = await axios.get(
+      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`
+        }
+      }
+    );
+
+    const data = response.data;
+
+    if (data.status === "success" && data.data.status === "successful") {
+      return res.json({
+        success: true,
+        amount: data.data.amount
+      });
+    } else {
+      return res.json({
+        success: false
+      });
+    }
+
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
+    return res.status(500).json({ error: "Verification failed" });
   }
 });
 
@@ -88,93 +161,4 @@ console.log("FINAL PORT:", PORT);
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
-});
-
-
-// ================= VERIFY PAYMENT =================
-app.get("/verify-payment/:tx_ref", async (req, res) => {
-  try {
-    const { tx_ref } = req.params;
-
-    const response = await axios.get(
-      `https://api.flutterwave.com/v3/transactions/verify_by_reference?tx_ref=${tx_ref}`,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`
-        }
-      }
-    );
-
-    const data = response.data;
-
-    console.log("VERIFY RESPONSE:", data);
-
-    if (data.status === "success" && data.data.status === "successful") {
-      return res.json({
-        success: true,
-        message: "Payment verified",
-        amount: data.data.amount
-      });
-    } else {
-      return res.json({
-        success: false,
-        message: "Payment not successful yet"
-      });
-    }
-
-  } catch (err) {
-    console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
-    return res.status(500).json({ error: "Verification failed" });
-  }
-});
-// TEMP TEST ROUTE (FOR BROWSER)
-app.get("/create-payment", async (req, res) => {
-  try {
-    const { orderId, amount } = req.query;
-
-    if (!orderId || !amount) {
-      return res.send("Missing orderId or amount in query");
-    }
-
-    const tx_ref = `tx_${orderId}_${Date.now()}`;
-
-    const response = await axios.post(
-  "https://api.flutterwave.com/v3/payments",
-  {
-    tx_ref,
-    amount,
-    currency: "NGN",
-    redirect_url: "https://flutterwave.com",
-
-    // 🔥 ENABLE MULTIPLE PAYMENT METHODS
-    payment_options: "card,banktransfer,ussd",
-
-    customer: {
-      email: "user@helply.com",
-      name: "Helply User"
-    },
-
-    customizations: {
-      title: "Helply Payment",
-      description: "Task payment"
-    }
-  },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.FLW_SECRET_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    return res.send(`
-      <h2>Payment Link</h2>
-      <a href="${response.data.data.link}" target="_blank">Pay Now</a>
-      <p>tx_ref: ${tx_ref}</p>
-    `);
-
-  } catch (err) {
-    console.error(err.response?.data || err.message);
-    res.send("Error creating payment");
-  }
 });
