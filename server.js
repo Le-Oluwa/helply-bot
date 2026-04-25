@@ -104,16 +104,18 @@ app.get("/verify-payment/:tx_ref", async (req, res) => {
 
     const data = response.data;
 
+    console.log("VERIFY RESPONSE:", data);
+
     if (data.status === "success" && data.data.status === "successful") {
       return res.json({
         success: true,
         message: "Payment verified",
-        data: data.data
+        amount: data.data.amount
       });
     } else {
       return res.json({
         success: false,
-        message: "Payment not successful"
+        message: "Payment not successful yet"
       });
     }
 
