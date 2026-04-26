@@ -4,7 +4,13 @@ const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
 
 // ================= INIT =================
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: { timeout: 10 }
+  }
+});
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -14,7 +20,7 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = String(process.env.RUNNER_GROUP_ID);
 
 console.log("🚀 Helply Running");
-console.log("📡 GROUP ID:", RUNNER_GROUP_ID);
+console.log("📡 GROUP:", RUNNER_GROUP_ID);
 
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
@@ -39,29 +45,30 @@ bot.onText(/\/start/, async (msg) => {
     return bot.sendMessage(userId, "👋 Welcome back to Helply!");
   }
 
-  return bot.sendMessage(userId,
+  return bot.sendMessage(
+    userId,
 `👋 Welcome to Helply!
 
 Do you accept terms?`,
-{
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "✅ Accept", callback_data: "accept_terms" }],
-      [{ text: "❌ Decline", callback_data: "decline_terms" }]
-    ]
-  }
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Accept", callback_data: "accept_terms" }],
+          [{ text: "❌ Decline", callback_data: "decline_terms" }]
+        ]
+      }
+    }
+  );
 });
-});
-
 
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
 
-  console.log("📩 MESSAGE:", msg.text);
-
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
+
+  console.log("📩", text);
 
   let { data: user } = await supabase
     .from("users")
@@ -75,7 +82,7 @@ bot.on("message", async (msg) => {
 
   if (text.startsWith("/")) return;
 
-  // ================= ACTIVE CHAT =================
+  // ===== ACTIVE CHAT AFTER PAYMENT =====
   const { data: activeOrder } = await supabase
     .from("orders")
     .select("*")
@@ -90,18 +97,13 @@ bot.on("message", async (msg) => {
         ? activeOrder.runner_id
         : activeOrder.user_id;
 
-    return bot.sendMessage(
-      receiver,
-      `💬 ${userId === activeOrder.user_id ? "Customer" : "Runner"}:\n${text}`
-    );
+    return bot.sendMessage(receiver, `💬 ${text}`);
   }
 
-  // ================= CREATE ORDER =================
+  // ===== CREATE ORDER =====
   const taskId = Date.now() + Math.floor(Math.random() * 1000);
 
-  console.log("📦 Creating order:", taskId);
-
-  const { data: orderData, error: orderError } = await supabase
+  const { error } = await supabase
     .from("orders")
     .insert([{
       id: taskId,
@@ -111,19 +113,15 @@ bot.on("message", async (msg) => {
       payment_status: "pending"
     }]);
 
-  if (orderError) {
-    console.error("❌ INSERT ERROR:", orderError);
+  if (error) {
+    console.error("❌ INSERT ERROR:", error);
     return bot.sendMessage(userId, "❌ Failed to create request");
   }
 
-  console.log("✅ ORDER INSERTED");
-
   await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-  // ================= SEND TO RUNNERS GROUP =================
+  // ===== SEND TO RUNNERS GROUP =====
   try {
-    console.log("📤 Sending to group...");
-
     await bot.sendMessage(
       RUNNER_GROUP_ID,
       `🚨 NEW REQUEST
@@ -133,19 +131,15 @@ bot.on("message", async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "💰 Offer ₦500", callback_data: `offer_${taskId}_500` }]
+            [{ text: "💰 Make Offer", callback_data: `offer_${taskId}_500` }]
           ]
         }
       }
     );
-
-    console.log("✅ Sent to runners group");
-
   } catch (err) {
     console.error("❌ GROUP ERROR:", err.response?.body || err.message);
   }
 });
-
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
@@ -153,14 +147,12 @@ bot.on("callback_query", async (q) => {
   const userId = q.from.id.toString();
 
   try {
-
-    // ===== ACCEPT TERMS =====
+    // ===== TERMS =====
     if (data === "accept_terms") {
       await supabase.from("users").upsert([{
         id: userId,
         accepted_terms: true
       }]);
-
       return bot.sendMessage(userId, "✅ You can now use Helply!");
     }
 
@@ -168,33 +160,83 @@ bot.on("callback_query", async (q) => {
       return bot.sendMessage(userId, "❌ You must accept terms.");
     }
 
-    // ===== OFFER START =====
+    // ===== START OFFER (BUTTON UI) =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
+      const base = Number(price);
 
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", Number(taskId))
-        .maybeSingle();
+      return bot.sendMessage(
+        userId,
+`💰 Set your offer
 
-      if (!order) return;
-
-      if (order.user_id === userId) {
-        return bot.answerCallbackQuery(q.id, {
-          text: "❌ You can't run your own task",
-          show_alert: true
-        });
-      }
-
-      return bot.sendMessage(userId, `₦${price}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "+100", callback_data: `price_${taskId}_${+price+100}` }],
-            [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
-          ]
+Current: ₦${base}`,
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "-50", callback_data: `adj_${taskId}_${base}_-50` },
+                { text: "+50", callback_data: `adj_${taskId}_${base}_50` }
+              ],
+              [
+                { text: "-100", callback_data: `adj_${taskId}_${base}_-100` },
+                { text: "+100", callback_data: `adj_${taskId}_${base}_100` }
+              ],
+              [
+                { text: "-500", callback_data: `adj_${taskId}_${base}_-500` },
+                { text: "+500", callback_data: `adj_${taskId}_${base}_500` }
+              ],
+              [
+                { text: "-1000", callback_data: `adj_${taskId}_${base}_-1000` },
+                { text: "+1000", callback_data: `adj_${taskId}_${base}_1000` }
+              ],
+              [
+                { text: "✅ Submit Offer", callback_data: `submit_${taskId}_${base}` }
+              ]
+            ]
+          }
         }
-      });
+      );
+    }
+
+    // ===== ADJUST PRICE (LIVE UPDATE) =====
+    if (data.startsWith("adj_")) {
+      const [_, taskId, current, change] = data.split("_");
+
+      let newPrice = Number(current) + Number(change);
+      if (newPrice < 100) newPrice = 100;
+
+      return bot.editMessageText(
+`💰 Set your offer
+
+Current: ₦${newPrice}`,
+        {
+          chat_id: q.message.chat.id,
+          message_id: q.message.message_id,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "-50", callback_data: `adj_${taskId}_${newPrice}_-50` },
+                { text: "+50", callback_data: `adj_${taskId}_${newPrice}_50` }
+              ],
+              [
+                { text: "-100", callback_data: `adj_${taskId}_${newPrice}_-100` },
+                { text: "+100", callback_data: `adj_${taskId}_${newPrice}_100` }
+              ],
+              [
+                { text: "-500", callback_data: `adj_${taskId}_${newPrice}_-500` },
+                { text: "+500", callback_data: `adj_${taskId}_${newPrice}_500` }
+              ],
+              [
+                { text: "-1000", callback_data: `adj_${taskId}_${newPrice}_-1000` },
+                { text: "+1000", callback_data: `adj_${taskId}_${newPrice}_1000` }
+              ],
+              [
+                { text: "✅ Submit Offer", callback_data: `submit_${taskId}_${newPrice}` }
+              ]
+            ]
+          }
+        }
+      );
     }
 
     // ===== SUBMIT OFFER =====
@@ -218,6 +260,7 @@ bot.on("callback_query", async (q) => {
         current_price: Number(price)
       }]);
 
+      // Send updated list of offers to user
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -235,7 +278,7 @@ bot.on("callback_query", async (q) => {
       });
     }
 
-    // ===== VIEW OFFER =====
+    // ===== VIEW OFFER (USER SIDE) =====
     if (data.startsWith("view_")) {
       const id = data.split("_")[1];
 
@@ -247,31 +290,17 @@ bot.on("callback_query", async (q) => {
 
       if (!o) return;
 
-      return bot.sendMessage(userId,
-        `${o.runner_name} — ₦${o.current_price}`,
+      return bot.sendMessage(
+        userId,
+`${o.runner_name} — ₦${o.current_price}`,
         {
           reply_markup: {
             inline_keyboard: [
-              [{ text: "✅ Accept", callback_data: `accept_${id}` }],
-              [
-                { text: "-50", callback_data: `adj_${id}_-50` },
-                { text: "+50", callback_data: `adj_${id}_50` }
-              ],
-              [
-                { text: "-100", callback_data: `adj_${id}_-100` },
-                { text: "+100", callback_data: `adj_${id}_100` }
-              ],
-              [
-                { text: "-500", callback_data: `adj_${id}_-500` },
-                { text: "+500", callback_data: `adj_${id}_500` }
-              ],
-              [
-                { text: "-1000", callback_data: `adj_${id}_-1000` },
-                { text: "+1000", callback_data: `adj_${id}_1000` }
-              ]
+              [{ text: "✅ Accept", callback_data: `accept_${id}` }]
             ]
           }
-        });
+        }
+      );
     }
 
     // ===== ACCEPT OFFER =====
