@@ -22,38 +22,49 @@ const RUNNER_GROUP_ID = String(process.env.RUNNER_GROUP_ID);
 console.log("🚀 Helply Running");
 console.log("📡 GROUP:", RUNNER_GROUP_ID);
 
-// ================= START =================
+// ================= START (TERMS FLOW) =================
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id.toString();
 
-  let { data: user } = await supabase
+  const { data: user, error } = await supabase
     .from("users")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user) {
-    await supabase.from("users").insert([{
-      id: userId,
-      accepted_terms: false,
-      banned: false
-    }]);
-    user = { accepted_terms: false };
+  if (error) {
+    console.error("❌ USER FETCH ERROR:", error);
+    return bot.sendMessage(userId, "⚠️ Error. Try again.");
   }
 
-  if (user.accepted_terms) {
-    return bot.sendMessage(userId, "👋 Welcome back to Helply!");
+  if (user && user.accepted_terms) {
+    return bot.sendMessage(userId, "👋 Welcome back!\nSend your request 🚀");
+  }
+
+  if (!user) {
+    const { error: insertError } = await supabase
+      .from("users")
+      .insert([{
+        id: userId,
+        accepted_terms: false,
+        banned: false
+      }]);
+
+    if (insertError) {
+      console.error("❌ USER INSERT ERROR:", insertError);
+      return bot.sendMessage(userId, "⚠️ Could not register.");
+    }
   }
 
   return bot.sendMessage(
     userId,
 `👋 Welcome to Helply!
 
-Do you accept terms?`,
+Please accept our Terms & Conditions to continue.`,
     {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "✅ Accept", callback_data: "accept_terms" }],
+          [{ text: "✅ Accept Terms", callback_data: "accept_terms" }],
           [{ text: "❌ Decline", callback_data: "decline_terms" }]
         ]
       }
@@ -68,8 +79,6 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
 
-  console.log("📩", text);
-
   let { data: user } = await supabase
     .from("users")
     .select("*")
@@ -77,12 +86,15 @@ bot.on("message", async (msg) => {
     .maybeSingle();
 
   if (!user || !user.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Use /start first.");
+    return bot.sendMessage(userId,
+`⚠️ You must accept Terms first.
+
+Send /start`);
   }
 
   if (text.startsWith("/")) return;
 
-  // ===== ACTIVE CHAT AFTER PAYMENT =====
+  // ===== ACTIVE CHAT =====
   const { data: activeOrder } = await supabase
     .from("orders")
     .select("*")
@@ -114,7 +126,7 @@ bot.on("message", async (msg) => {
     }]);
 
   if (error) {
-    console.error("❌ INSERT ERROR:", error);
+    console.error("❌ ORDER INSERT ERROR:", error);
     return bot.sendMessage(userId, "❌ Failed to create request");
   }
 
@@ -137,7 +149,7 @@ bot.on("message", async (msg) => {
       }
     );
   } catch (err) {
-    console.error("❌ GROUP ERROR:", err.response?.body || err.message);
+    console.error("❌ GROUP ERROR:", err.message);
   }
 });
 
@@ -147,20 +159,30 @@ bot.on("callback_query", async (q) => {
   const userId = q.from.id.toString();
 
   try {
+
     // ===== TERMS =====
     if (data === "accept_terms") {
-      await supabase.from("users").upsert([{
-        id: userId,
-        accepted_terms: true
-      }]);
-      return bot.sendMessage(userId, "✅ You can now use Helply!");
+      await bot.answerCallbackQuery(q.id);
+
+      const { error } = await supabase
+        .from("users")
+        .update({ accepted_terms: true })
+        .eq("id", userId);
+
+      if (error) {
+        console.error("❌ TERMS ERROR:", error);
+        return bot.sendMessage(userId, "⚠️ Failed to save.");
+      }
+
+      return bot.sendMessage(userId, "✅ You're in!\nSend request 🚀");
     }
 
     if (data === "decline_terms") {
+      await bot.answerCallbackQuery(q.id);
       return bot.sendMessage(userId, "❌ You must accept terms.");
     }
 
-    // ===== START OFFER (BUTTON UI) =====
+    // ===== START OFFER =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
       const base = Number(price);
@@ -198,7 +220,7 @@ Current: ₦${base}`,
       );
     }
 
-    // ===== ADJUST PRICE (LIVE UPDATE) =====
+    // ===== ADJUST PRICE =====
     if (data.startsWith("adj_")) {
       const [_, taskId, current, change] = data.split("_");
 
@@ -260,7 +282,6 @@ Current: ₦${newPrice}`,
         current_price: Number(price)
       }]);
 
-      // Send updated list of offers to user
       const { data: offers } = await supabase
         .from("offers")
         .select("*")
@@ -278,7 +299,7 @@ Current: ₦${newPrice}`,
       });
     }
 
-    // ===== VIEW OFFER (USER SIDE) =====
+    // ===== VIEW OFFER =====
     if (data.startsWith("view_")) {
       const id = data.split("_")[1];
 
@@ -303,7 +324,7 @@ Current: ₦${newPrice}`,
       );
     }
 
-    // ===== ACCEPT OFFER =====
+    // ===== ACCEPT =====
     if (data.startsWith("accept_")) {
       const id = data.split("_")[1];
 
