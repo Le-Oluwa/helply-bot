@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require("uuid");
 
 // ================= INIT =================
 const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: { interval: 300, autoStart: true }
+  polling: true
 });
 
 const supabase = createClient(
@@ -18,11 +18,9 @@ const RUNNER_GROUP_ID = String(process.env.RUNNER_GROUP_ID);
 console.log("🚀 Helply Running");
 console.log("📡 GROUP:", RUNNER_GROUP_ID);
 
-// ================= START (TERMS) =================
+// ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id.toString();
-
-  console.log("👤 START:", userId);
 
   let { data: user } = await supabase
     .from("users")
@@ -30,28 +28,23 @@ bot.onText(/\/start/, async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
-  // Create user if not exists
   if (!user) {
     await supabase.from("users").insert([{
       id: userId,
       accepted_terms: false,
       banned: false
     }]);
-
     user = { accepted_terms: false };
   }
 
-  // Skip if already accepted
   if (user.accepted_terms) {
     return bot.sendMessage(userId, "👋 Welcome back!\nSend your request 🚀");
   }
 
-  // Show terms
-  return bot.sendMessage(
-    userId,
+  return bot.sendMessage(userId,
 `👋 Welcome to Helply!
 
-Please accept our Terms & Conditions to continue.`,
+Please accept Terms & Conditions.`,
     {
       reply_markup: {
         inline_keyboard: [
@@ -70,8 +63,6 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
 
-  console.log("📩 MESSAGE:", text);
-
   if (text.startsWith("/")) return;
 
   let { data: user } = await supabase
@@ -80,10 +71,8 @@ bot.on("message", async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
-  // Block if no terms
   if (!user || !user.accepted_terms) {
-    console.log("❌ TERMS NOT ACCEPTED");
-    return bot.sendMessage(userId, "⚠️ Please send /start and accept terms");
+    return bot.sendMessage(userId, "⚠️ Send /start and accept terms");
   }
 
   // ===== ACTIVE CHAT =====
@@ -105,9 +94,7 @@ bot.on("message", async (msg) => {
   }
 
   // ===== CREATE ORDER =====
-  console.log("📦 Creating order...");
-
-  const taskId = Date.now() + Math.floor(Math.random() * 1000);
+  const taskId = Date.now();
 
   const { error } = await supabase
     .from("orders")
@@ -120,17 +107,13 @@ bot.on("message", async (msg) => {
     }]);
 
   if (error) {
-    console.error("❌ ORDER ERROR:", error);
+    console.log("❌ ORDER ERROR:", error);
     return bot.sendMessage(userId, "❌ Failed to create request");
   }
-
-  console.log("✅ ORDER CREATED:", taskId);
 
   await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
   // ===== SEND TO GROUP =====
-  console.log("📤 Sending to group...");
-
   try {
     await bot.sendMessage(
       RUNNER_GROUP_ID,
@@ -146,10 +129,8 @@ bot.on("message", async (msg) => {
         }
       }
     );
-
-    console.log("✅ SENT TO GROUP");
   } catch (err) {
-    console.error("❌ GROUP ERROR:", err.response?.body || err.message);
+    console.log("❌ GROUP ERROR:", err.message);
   }
 });
 
@@ -160,16 +141,14 @@ bot.on("callback_query", async (q) => {
 
   try {
 
-    // ===== ACCEPT TERMS =====
+    // ===== TERMS =====
     if (data === "accept_terms") {
-      await bot.answerCallbackQuery(q.id);
-
       await supabase
         .from("users")
         .update({ accepted_terms: true })
         .eq("id", userId);
 
-      return bot.sendMessage(userId, "🎉 You're in!\nSend your request 🚀");
+      return bot.sendMessage(userId, "🎉 You're in!\nSend request 🚀");
     }
 
     if (data === "decline_terms") {
@@ -181,8 +160,7 @@ bot.on("callback_query", async (q) => {
       const [_, taskId, price] = data.split("_");
       const base = Number(price);
 
-      return bot.sendMessage(
-        userId,
+      return bot.sendMessage(userId,
 `💰 Set your offer
 
 ₦${base}`,
@@ -214,7 +192,7 @@ bot.on("callback_query", async (q) => {
       );
     }
 
-    // ===== ADJUST PRICE =====
+    // ===== ADJUST =====
     if (data.startsWith("adj_")) {
       const [_, taskId, current, change] = data.split("_");
 
@@ -293,7 +271,7 @@ bot.on("callback_query", async (q) => {
       });
     }
 
-    // ===== ACCEPT OFFER =====
+    // ===== ACCEPT =====
     if (data.startsWith("accept_")) {
       const id = data.split("_")[1];
 
@@ -307,6 +285,7 @@ bot.on("callback_query", async (q) => {
 
       const agreed = Number(o.current_price);
       const userPays = Math.ceil(agreed * 1.05);
+      const runnerGets = Math.floor(agreed * 0.95);
 
       await supabase
         .from("orders")
@@ -314,6 +293,7 @@ bot.on("callback_query", async (q) => {
           runner_id: o.runner_id,
           agreed_price: agreed,
           total_price: userPays,
+          runner_payout: runnerGets,
           payment_status: "pending",
           status: "matched"
         })
@@ -327,13 +307,13 @@ bot.on("callback_query", async (q) => {
 Service: ₦${agreed}
 Total: ₦${userPays}
 
-Pay here:
+Pay:
 ${link}`);
 
       await bot.sendMessage(o.runner_id,
-`🎉 Task assigned
+`🎉 Task accepted
 
-You will be paid after completion`);
+You’ll receive ₦${runnerGets} after completion`);
     }
 
   } catch (err) {
