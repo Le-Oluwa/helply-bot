@@ -4,9 +4,7 @@ const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
 
 // ================= INIT =================
-const bot = new TelegramBot(process.env.BOT_TOKEN, {
-  polling: true
-});
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -16,7 +14,6 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = String(process.env.RUNNER_GROUP_ID);
 
 console.log("🚀 Helply Running");
-console.log("📡 GROUP:", RUNNER_GROUP_ID);
 
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
@@ -34,22 +31,42 @@ bot.onText(/\/start/, async (msg) => {
       accepted_terms: false,
       banned: false
     }]);
-    user = { accepted_terms: false };
-  }
 
-  if (user.accepted_terms) {
-    return bot.sendMessage(userId, "👋 Welcome back!\nSend your request 🚀");
+    return bot.sendMessage(userId,
+`👋 Welcome to Helply!
+
+Please accept Terms & Conditions to continue.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept", callback_data: "accept_terms" }],
+            [{ text: "❌ Decline", callback_data: "decline_terms" }]
+          ]
+        }
+      }
+    );
   }
 
   return bot.sendMessage(userId,
-`👋 Welcome to Helply!
+`👋 Welcome back!
 
-Please accept Terms & Conditions.`,
+Send your request 🚀
+(Type /terms to view terms again)`);
+});
+
+// ================= TERMS COMMAND =================
+bot.onText(/\/terms/, (msg) => {
+  bot.sendMessage(msg.chat.id,
+`📜 Helply Terms:
+
+• Payment must be made before task starts  
+• Helply charges 10% (5% user + 5% runner)  
+• No fraud or abuse  
+• Respect runners`,
     {
       reply_markup: {
         inline_keyboard: [
-          [{ text: "✅ Accept", callback_data: "accept_terms" }],
-          [{ text: "❌ Decline", callback_data: "decline_terms" }]
+          [{ text: "✅ Accept", callback_data: "accept_terms" }]
         ]
       }
     }
@@ -71,8 +88,19 @@ bot.on("message", async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
+  // 🔥 FORCE TERMS BEFORE REQUEST
   if (!user || !user.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Send /start and accept terms");
+    return bot.sendMessage(userId,
+`📜 You must accept Terms & Conditions first`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept", callback_data: "accept_terms" }],
+            [{ text: "❌ Decline", callback_data: "decline_terms" }]
+          ]
+        }
+      }
+    );
   }
 
   // ===== ACTIVE CHAT =====
@@ -141,7 +169,7 @@ bot.on("callback_query", async (q) => {
 
   try {
 
-    // ===== TERMS =====
+    // ===== ACCEPT TERMS =====
     if (data === "accept_terms") {
       await supabase
         .from("users")
@@ -262,7 +290,7 @@ bot.on("callback_query", async (q) => {
       const buttons = offers.map(o => [
         {
           text: `${o.runner_name} — ₦${o.current_price}`,
-          callback_data: `view_${o.id}`
+          callback_data: `accept_${o.id}`
         }
       ]);
 
@@ -313,7 +341,7 @@ ${link}`);
       await bot.sendMessage(o.runner_id,
 `🎉 Task accepted
 
-You’ll receive ₦${runnerGets} after completion`);
+You’ll receive ₦${runnerGets}`);
     }
 
   } catch (err) {
