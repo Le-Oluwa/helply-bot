@@ -3,7 +3,7 @@ const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
 const express = require("express");
-
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 const app = express();
 app.use(express.json());
 
@@ -30,43 +30,62 @@ async function isUserBusy(userId) {
   return data && data.length > 0;
 }
 
-// ================= PAYMENT SUCCESS =================app.post("/payment-success", async (req, res) => {
-  const { orderId } = req.body;
+// ================= PAYMENT SUCCESS =================
+app.post("/payment-success", async (req, res) => {
+  try {
+    const { orderId } = req.body;
 
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(orderId))
-    .maybeSingle();
+    if (!orderId) {
+      return res.status(400).send("Missing orderId");
+    }
 
-  if (!order) return res.sendStatus(404);
+    const { data: order, error } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", Number(orderId))
+      .maybeSingle();
 
-  await supabase.from("orders").update({
-    payment_status: "paid",
-    status: "in_progress"
-  }).eq("id", Number(orderId));
+    if (error || !order) {
+      console.log("ORDER ERROR:", error);
+      return res.status(404).send("Order not found");
+    }
 
-  await bot.sendMessage(order.user_id,
+    // update order
+    await supabase.from("orders").update({
+      payment_status: "paid",
+      status: "in_progress"
+    }).eq("id", Number(orderId));
+
+    // notify user
+    await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
 You can now chat with:
 ${order.runner_username ? "@" + order.runner_username : "your runner"}`);
 
-  await bot.sendMessage(order.runner_id,
+    // notify runner
+    await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
 Contact the user now 🚀`);
 
-  res.sendStatus(200);
+    return res.send("OK");
+  } catch (err) {
+    console.log("PAYMENT SUCCESS ERROR:", err);
+    return res.status(500).send("Server error");
+  }
 });
 
 // ================= CREATE PAYMENT =================
 app.get("/create-payment", async (req, res) => {
   const { orderId } = req.query;
 
-  if (!orderId) return res.send("Missing orderId");
+  if (!orderId) {
+    return res.send("Missing orderId");
+  }
 
   try {
+    // call your own webhook internally
     await fetch(`${BASE_URL}/payment-success`, {
       method: "POST",
       headers: {
@@ -75,10 +94,14 @@ app.get("/create-payment", async (req, res) => {
       body: JSON.stringify({ orderId })
     });
 
-    res.send("<h2>✅ Payment Successful</h2><p>Return to Telegram</p>");
+    return res.send(`
+      <h2>✅ Payment Successful</h2>
+      <p>You can return to Telegram</p>
+    `);
+
   } catch (err) {
-    console.log(err);
-    res.send("Payment failed");
+    console.log("PAYMENT ERROR:", err);
+    return res.send("Payment failed");
   }
 });
 
