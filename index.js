@@ -357,50 +357,51 @@ bot.on("callback_query", async (q) => {
       await bot.sendMessage(o.runner_id, `💬 New price: ₦${newPrice}`);
     }
 
-    // ===== ACCEPT =====
-    if (data.startsWith("accept_")) {
-      const id = data.split("_")[1];
+   // ===== ACCEPT =====
+if (data.startsWith("accept_")) {
+  const id = data.split("_")[1];
 
-      const { data: o } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+  const { data: o } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
 
-      if (!o) return;
+  if (!o) return;
 
-      const agreed = o.current_price;
-      const userPays = Math.ceil(agreed * 1.3);
-      const runnerGets = Math.floor(agreed * 0.9);
+  const agreed = o.current_price;
+  const userPays = Math.ceil(agreed * 1.3);
+  const runnerGets = Math.floor(agreed * 0.9);
 
-      await supabase.from("orders").update({
-        runner_id: o.runner_id,
-        runner_username: o.runner_username,
-        agreed_price: agreed,
-        total_price: userPays,
-        runner_payout: runnerGets,
-        payment_status: "pending",
-        status: "matched"
-      }).eq("id", o.order_id);
+  // 🔥 FORCE USERNAME SAVE
+  await supabase.from("orders").update({
+    runner_id: o.runner_id,
+    runner_username: o.runner_username || "",
+    agreed_price: agreed,
+    total_price: userPays,
+    runner_payout: runnerGets,
+    payment_status: "pending",
+    status: "matched"
+  }).eq("id", o.order_id);
 
-      const link = `${process.env.BASE_URL}/create-payment?orderId=${o.order_id}`;
+  const link = `${process.env.BASE_URL}/create-payment?orderId=${o.order_id}`;
 
-      await bot.sendMessage(o.user_id,
+  await bot.sendMessage(o.user_id,
 `💳 Pay ₦${userPays}
 ${link}`);
 
-      await bot.sendMessage(o.runner_id,
+  await bot.sendMessage(o.runner_id,
 `🎉 Task assigned`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "❌ Cancel", callback_data: `cancel_${o.order_id}` }],
-              [{ text: "✅ Complete", callback_data: `complete_${o.order_id}` }]
-            ]
-          }
-        }
-      );
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ Cancel", callback_data: `cancel_${o.order_id}` }],
+          [{ text: "✅ Complete", callback_data: `complete_${o.order_id}` }]
+        ]
+      }
     }
+  );
+}
 
     // ===== COMPLETE =====
     if (data.startsWith("complete_")) {
