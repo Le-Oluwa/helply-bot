@@ -24,7 +24,7 @@ async function isBusy(userId) {
     .from("orders")
     .select("id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["open", "matched", "in_progress"]);
+    .in("status", ["matched", "in_progress"]); // ✅ FIXED
 
   return data && data.length > 0;
 }
@@ -50,12 +50,12 @@ app.post("/payment-success", async (req, res) => {
 `✅ Payment confirmed!
 
 You can now chat with:
-@${order.runner_username}`);
+${order.runner_username ? "@" + order.runner_username : "your runner"}`);
 
   await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
-Contact user now.`);
+Contact the user now 🚀`);
 
   res.sendStatus(200);
 });
@@ -94,6 +94,19 @@ Please accept Terms to continue`,
 
   await supabase.from("users").update({ username }).eq("id", userId);
 
+  if (!user.accepted_terms) {
+    return bot.sendMessage(userId,
+`Please accept Terms`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept", callback_data: "accept_terms" }]
+          ]
+        }
+      }
+    );
+  }
+
   bot.sendMessage(userId, "👋 Send your request 🚀");
 });
 
@@ -114,7 +127,7 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "⚠️ Use /start first");
   }
 
-  // ===== CHAT (ONLY AFTER PAYMENT) =====
+  // ===== CHAT AFTER PAYMENT =====
   const { data: activeOrder } = await supabase
     .from("orders")
     .select("*")
@@ -132,7 +145,7 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(receiver, `💬 ${text}`);
   }
 
-  // ===== PREVENT MULTIPLE TASKS =====
+  // ===== PREVENT MULTIPLE ACTIVE TASKS =====
   const busy = await isBusy(userId);
   if (busy) {
     return bot.sendMessage(userId, "❌ Finish your current task first.");
@@ -152,7 +165,6 @@ bot.on("message", async (msg) => {
 
   await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-  // ===== SEND TO GROUP ONLY =====
   await bot.sendMessage(
     RUNNER_GROUP_ID,
     `🚨 NEW REQUEST
@@ -176,7 +188,6 @@ bot.on("callback_query", async (q) => {
 
   try {
 
-    // ===== ACCEPT TERMS =====
     if (data === "accept_terms") {
       await supabase.from("users")
         .update({ accepted_terms: true })
@@ -200,6 +211,21 @@ bot.on("callback_query", async (q) => {
       if (order.user_id === userId) {
         return bot.answerCallbackQuery(q.id, {
           text: "❌ You can't run your own task",
+          show_alert: true
+        });
+      }
+
+      // prevent duplicate offer
+      const { data: existing } = await supabase
+        .from("offers")
+        .select("id")
+        .eq("order_id", taskId)
+        .eq("runner_id", userId)
+        .maybeSingle();
+
+      if (existing) {
+        return bot.answerCallbackQuery(q.id, {
+          text: "❌ You already offered",
           show_alert: true
         });
       }
@@ -347,6 +373,7 @@ bot.on("callback_query", async (q) => {
         agreed_price: agreed,
         total_price: userPays,
         runner_payout: runnerGets,
+        payment_status: "pending",
         status: "matched"
       }).eq("id", o.order_id);
 
