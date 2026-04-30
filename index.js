@@ -30,8 +30,7 @@ async function isUserBusy(userId) {
   return data && data.length > 0;
 }
 
-// ================= PAYMENT SUCCESS =================
-app.post("/payment-success", async (req, res) => {
+// ================= PAYMENT SUCCESS =================app.post("/payment-success", async (req, res) => {
   const { orderId } = req.body;
 
   const { data: order } = await supabase
@@ -50,13 +49,13 @@ app.post("/payment-success", async (req, res) => {
   await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
-Chat unlocked with:
+You can now chat with:
 ${order.runner_username ? "@" + order.runner_username : "your runner"}`);
 
   await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
-You can now chat with the user.`);
+Contact the user now 🚀`);
 
   res.sendStatus(200);
 });
