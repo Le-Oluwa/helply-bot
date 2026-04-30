@@ -377,7 +377,7 @@ bot.on("callback_query", async (q) => {
         status: "matched"
       }).eq("id", o.order_id);
 
-      const link = `https://your-payment-url/create-payment?orderId=${o.order_id}`;
+      const link = `https://helply-bot-production.up.railway.app/create-payment?orderId=${o.order_id}`;
 
       await bot.sendMessage(o.user_id,
 `💳 Pay ₦${userPays}
