@@ -383,7 +383,7 @@ bot.on("callback_query", async (q) => {
         status: "matched"
       }).eq("id", o.order_id);
 
-      const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
+      const link = `${process.env.BASE_URL}/create-payment?orderId=${o.order_id}`;
 
       await bot.sendMessage(o.user_id,
 `💳 Pay ₦${userPays}
