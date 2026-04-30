@@ -77,31 +77,70 @@ Contact the user now 🚀`);
 });
 
 // ================= CREATE PAYMENT =================
-app.get("/create-payment", async (req, res) => {
-  const { orderId } = req.query;
-
-  if (!orderId) {
-    return res.send("Missing orderId");
-  }
-
+app.post("/payment-success", async (req, res) => {
   try {
-    // call your own webhook internally
-    await fetch(`${BASE_URL}/payment-success`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ orderId })
-    });
+    const { orderId } = req.body;
 
-    return res.send(`
-      <h2>✅ Payment Successful</h2>
-      <p>You can return to Telegram</p>
-    `);
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", Number(orderId))
+      .maybeSingle();
+
+    if (!order) return res.sendStatus(404);
+
+    await supabase.from("orders").update({
+      payment_status: "paid",
+      status: "in_progress"
+    }).eq("id", Number(orderId));
+
+    // usernames
+    const runnerTag = order.runner_username
+      ? "@" + order.runner_username
+      : "your runner";
+
+    const userTag = order.user_username
+      ? "@" + order.user_username
+      : "the user";
+
+    // 🔥 USER MESSAGE
+    await bot.sendMessage(order.user_id,
+`✅ Payment confirmed!
+
+🤝 You are now connected with ${runnerTag}
+
+💬 Send a message — it will go directly to your runner`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
+          ]
+        }
+      }
+    );
+
+    // 🔥 RUNNER MESSAGE
+    await bot.sendMessage(order.runner_id,
+`💰 Payment received!
+
+🤝 You are now connected with ${userTag}
+
+💬 Send a message — it will go directly to the customer`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel", callback_data: `cancel_${order.id}` }],
+            [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
+          ]
+        }
+      }
+    );
+
+    res.send("OK");
 
   } catch (err) {
     console.log("PAYMENT ERROR:", err);
-    return res.send("Payment failed");
+    res.status(500).send("Error");
   }
 });
 
