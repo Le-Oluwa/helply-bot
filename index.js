@@ -286,6 +286,17 @@ try {
 } catch (err) {
   console.log("❌ GROUP SEND ERROR:", err.message);
 }
+  // ================= MESSAGE =================
+bot.on("message", async (msg) => {
+  ...
+  try {
+    await bot.sendMessage(RUNNER_GROUP_ID, ...);
+  } catch (err) {
+    console.log(err);
+  }
+
+}); 
+
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
   const data = q.data;
