@@ -436,9 +436,12 @@ bot.on("callback_query", async (q) => {
 "❌ You cancelled the task. You can accept new tasks.");
 
   return bot.answerCallbackQuery(q.id);
+} catch (err) {
+  console.log("❌ ERROR:", err.message);
 }
+}); // ✅ THIS closes bot.on("callback_query")
 
 // ================= SERVER =================
 app.listen(3000, () => {
-  console.log("🌐 Server running");
+  console.log("🌐 Server running on port 3000");
 });
