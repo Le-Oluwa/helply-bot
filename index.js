@@ -201,16 +201,46 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
 
-  const { data: user } = await supabase
+    // ================= USER CHECK (PUT HERE) =================
+  let { data: user } = await supabase
     .from("users")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user?.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Use /start first");
+  // 🔥 Auto create user
+  if (!user) {
+    await supabase.from("users").insert([{
+      id: userId,
+      username: msg.from.username || "",
+      accepted_terms: false
+    }]);
+
+    return bot.sendMessage(userId,
+`👋 Welcome to Helply!
+
+Tap below to continue`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Accept Terms", callback_data: "accept_terms" }]
+        ]
+      }
+    });
   }
 
+  // 🔥 Block until terms accepted
+  if (!user.accepted_terms) {
+    return bot.sendMessage(userId,
+`⚠️ Please accept terms to continue`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Accept Terms", callback_data: "accept_terms" }]
+        ]
+      }
+    });
+  }
   // ===== CHAT =====
   const { data: activeOrder } = await supabase
     .from("orders")
