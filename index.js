@@ -264,10 +264,13 @@ await supabase.from("orders").insert([{
   status: "open",
   payment_status: "pending"
 }]);
-  
-  await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-  await bot.sendMessage(RUNNER_GROUP_ID,
+await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
+
+// 🔥 SEND TO RUNNER GROUP (PUT IT HERE)
+try {
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
@@ -280,8 +283,9 @@ await supabase.from("orders").insert([{
       }
     }
   );
-});
-
+} catch (err) {
+  console.log("❌ GROUP SEND ERROR:", err.message);
+}
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
   const data = q.data;
