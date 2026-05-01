@@ -20,11 +20,11 @@ const BASE_URL = process.env.BASE_URL;
 console.log("🚀 Helply Running");
 
 // ================= HELPER =================
-async function isUserBusy(userId) {
+async function isBusy(userId) {
   const { data } = await supabase
     .from("orders")
-    .select("id")
-    .eq("user_id", userId)
+    .select("id, status")
+    .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
     .in("status", ["matched", "in_progress"]);
 
   return data && data.length > 0;
@@ -66,34 +66,38 @@ app.post("/payment-success", async (req, res) => {
       : "User";
 
     // ✅ notify USER
-    await bot.sendMessage(order.user_id,
+await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
 🤝 You are now connected with ${runnerTag}
 
-💬 Send a message to start the task.`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-        ]
-      }
-    });
+💬 Start chatting now.`);
 
+// 🔥 send button separately (this fixes visibility issue)
+await bot.sendMessage(order.user_id,
+"👇 Tap below when you're done:",
+{
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+    ]
+  }
+});
     // ✅ notify RUNNER
     await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
-🤝 You are now connected with ${userTag}
+🤝 You are now connected with ${userTag}`);
 
-🚀 Start the task now.`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-        ]
-      }
-    });
+await bot.sendMessage(order.runner_id,
+"👇 Tap below when task is done:",
+{
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+    ]
+  }
+});
 
     return res.send("OK");
 
@@ -335,31 +339,32 @@ bot.on("callback_query", async (q) => {
       return bot.sendMessage(userId, "🎉 You're in!");
     }
         // ===== END CHAT =====
-    if (data.startsWith("end_")) {
-      const orderId = data.split("_")[1];
+  if (data.startsWith("end_")) {
+  const orderId = data.split("_")[1];
 
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", Number(orderId))
-        .maybeSingle();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(orderId))
+    .maybeSingle();
 
-      if (!order) return;
+  if (!order) return;
 
-      await supabase.from("orders")
-        .update({ status: "completed" })
-        .eq("id", Number(orderId));
+  await supabase.from("orders")
+    .update({
+      status: "completed",
+      payment_status: "completed"
+    })
+    .eq("id", Number(orderId));
 
-      await bot.sendMessage(order.user_id,
-        "✅ Chat ended. You can now send a new request.");
+  await bot.sendMessage(order.user_id,
+"✅ Task completed. You can send a new request.");
 
-      await bot.sendMessage(order.runner_id,
-        "✅ Task completed. You can now accept new tasks.");
+  await bot.sendMessage(order.runner_id,
+"✅ Task completed. You can accept new tasks.");
 
-      return bot.answerCallbackQuery(q.id, {
-        text: "Chat ended"
-      });
-    }
+  return bot.answerCallbackQuery(q.id, { text: "Task ended" });
+}
 
     // ===== OFFER =====
 if (data.startsWith("offer_")) {
@@ -587,7 +592,7 @@ ${link}`);
     }
 
     // ===== CANCEL =====
-    if (data.startsWith("cancel_")) {
+if (data.startsWith("cancel_")) {
   const orderId = data.split("_")[1];
 
   const { data: order } = await supabase
@@ -596,7 +601,12 @@ ${link}`);
     .eq("id", Number(orderId))
     .maybeSingle();
 
-  if (!order || order.runner_id !== userId) return;
+  if (!order || order.runner_id !== userId) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Not allowed",
+      show_alert: true
+    });
+  }
 
   // 🔥 FULL RESET
   await supabase.from("orders").update({
@@ -606,9 +616,17 @@ ${link}`);
     payment_status: "pending"
   }).eq("id", Number(orderId));
 
+  // ✅ notify user
   await bot.sendMessage(order.user_id,
-"⚠️ Runner cancelled. New runners can offer now.");
+    "⚠️ Runner cancelled. New runners can now offer."
+  );
 
+  // ✅ notify runner
+  await bot.sendMessage(order.runner_id,
+    "❌ You cancelled the task. You can now accept new ones."
+  );
+
+  // ✅ repost to runners group
   await bot.sendMessage(
     RUNNER_GROUP_ID,
 `🚨 TASK REOPENED
@@ -623,12 +641,11 @@ ${link}`);
       }
     }
   );
-}
 
-  } catch (err) {
-    console.log("❌ ERROR:", err.message);
-  }
-});
+  return bot.answerCallbackQuery(q.id, {
+    text: "Task cancelled"
+  });
+}
 
 // ================= SERVER =================
 app.listen(3000, () => {
