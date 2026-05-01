@@ -29,7 +29,6 @@ async function isBusy(userId) {
 
   return data && data.length > 0;
 }
-
 // ================= PAYMENT SUCCESS =================
 app.post("/payment-success", async (req, res) => {
   try {
@@ -56,7 +55,7 @@ app.post("/payment-success", async (req, res) => {
       status: "in_progress"
     }).eq("id", Number(orderId));
 
-    // 🔥 safe usernames
+    // usernames
     const runnerTag = order.runner_username
       ? "@" + order.runner_username
       : "Runner";
@@ -65,113 +64,72 @@ app.post("/payment-success", async (req, res) => {
       ? "@" + order.user_username
       : "User";
 
-    // ✅ notify USER
-await bot.sendMessage(order.user_id,
-`✅ Payment confirmed!
-
-🤝 You are now connected with ${runnerTag}
-
-💬 Start chatting now.`);
-
-// 🔥 send button separately (this fixes visibility issue)
-await bot.sendMessage(order.user_id,
-"👇 Tap below when you're done:",
-{
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-    ]
-  }
-});
-    // ✅ notify RUNNER
-    await bot.sendMessage(order.runner_id,
-`💰 Payment received!
-
-🤝 You are now connected with ${userTag}`);
-
-await bot.sendMessage(order.runner_id,
-"👇 Tap below when task is done:",
-{
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-    ]
-  }
-});
-
-    return res.send("OK");
-
-  } catch (err) {
-    console.log("PAYMENT SUCCESS ERROR:", err);
-    return res.status(500).send("Server error");
-  }
-});
-
-// ================= CREATE PAYMENT =================
-app.post("/payment-success", async (req, res) => {
-  try {
-    const { orderId } = req.body;
-
-    const { data: order } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", Number(orderId))
-      .maybeSingle();
-
-    if (!order) return res.sendStatus(404);
-
-    await supabase.from("orders").update({
-      payment_status: "paid",
-      status: "in_progress"
-    }).eq("id", Number(orderId));
-
-    // usernames
-    const runnerTag = order.runner_username
-      ? "@" + order.runner_username
-      : "your runner";
-
-    const userTag = order.user_username
-      ? "@" + order.user_username
-      : "the user";
-
-    // 🔥 USER MESSAGE
+    // ✅ USER MESSAGE
     await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
 🤝 You are now connected with ${runnerTag}
 
-💬 Send a message — it will go directly to your runner`,
+💬 Start chatting now.`,
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
+            [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
           ]
         }
       }
     );
 
-    // 🔥 RUNNER MESSAGE
+    // ✅ RUNNER MESSAGE
     await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
 🤝 You are now connected with ${userTag}
 
-💬 Send a message — it will go directly to the customer`,
+🚀 Start the task.`,
       {
         reply_markup: {
           inline_keyboard: [
             [{ text: "❌ Cancel", callback_data: `cancel_${order.id}` }],
-            [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
+            [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
           ]
         }
       }
     );
 
-    res.send("OK");
+    return res.send("OK");
 
   } catch (err) {
     console.log("PAYMENT ERROR:", err);
-    res.status(500).send("Error");
+    return res.status(500).send("Server error");
+  }
+});
+// ================= CREATE PAYMENT =================
+app.get("/create-payment", async (req, res) => {
+  try {
+    const { orderId } = req.query;
+
+    if (!orderId) {
+      return res.send("Missing orderId");
+    }
+
+    // 🔥 Simulate payment success (for now)
+    await fetch(`${BASE_URL}/payment-success`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ orderId })
+    });
+
+    return res.send(`
+      <h2>✅ Payment Successful</h2>
+      <p>You can return to Telegram</p>
+    `);
+
+  } catch (err) {
+    console.log("CREATE PAYMENT ERROR:", err);
+    return res.send("Payment failed");
   }
 });
 
@@ -272,41 +230,41 @@ Tap below to continue`,
       }
     });
   }
-  // ===== CHAT =====
-  const { data: activeOrder } = await supabase
-    .from("orders")
-    .select("*")
-    .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .eq("payment_status", "paid")
-    .eq("status", "in_progress")
-    .maybeSingle();
+  /// ===== CHAT =====
+const { data: activeOrder } = await supabase
+  .from("orders")
+  .select("*")
+  .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
+  .eq("payment_status", "paid")
+  .eq("status", "in_progress")
+  .maybeSingle();
 
-  if (activeOrder) {
-    const receiver =
-      userId === activeOrder.user_id
-        ? activeOrder.runner_id
-        : activeOrder.user_id;
+if (activeOrder) {
+  const receiver =
+    userId === activeOrder.user_id
+      ? activeOrder.runner_id
+      : activeOrder.user_id;
 
-    return bot.sendMessage(receiver, `💬 ${text}`);
-  }
+  return bot.sendMessage(receiver, `💬 ${text}`);
+}
 
-  // ===== BUSY =====
-  if (await isUserBusy(userId)) {
-    return bot.sendMessage(userId, "❌ Finish current task first.");
-  }
+// ===== BUSY CHECK (PUT IT HERE) =====
+if (await isBusy(userId)) {
+  return bot.sendMessage(userId, "❌ Finish current task first.");
+}
 
-  // ===== CREATE ORDER =====
-  const taskId = Date.now();
+// ===== CREATE ORDER =====
+const taskId = Date.now();
 
-  await supabase.from("orders").insert([{
-    id: taskId,
-    user_id: userId,
-    user_username: msg.from.username || "",
-    delivery_location: text,
-    status: "open",
-    payment_status: "pending"
-  }]);
-
+await supabase.from("orders").insert([{
+  id: taskId,
+  user_id: userId,
+  user_username: msg.from.username || "",
+  delivery_location: text,
+  status: "open",
+  payment_status: "pending"
+}]);
+  
   await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
   await bot.sendMessage(RUNNER_GROUP_ID,
