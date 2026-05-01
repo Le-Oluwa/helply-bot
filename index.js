@@ -392,7 +392,7 @@ bot.on("callback_query", async (q) => {
         .eq("id", id)
         .maybeSingle();
 
-      await supabase.from("offers").delete().eq("order_id", o.order_id);
+      await supabase.from("offers").delete().eq("order_id", String(orderId))
 
       await supabase.from("orders").update({
         runner_id: o.runner_id,
@@ -405,8 +405,7 @@ bot.on("callback_query", async (q) => {
       await bot.sendMessage(o.user_id, `💳 Pay:\n${link}`);
     }
 
-    // ===== CANCEL =====
-    // ===== CANCEL =====
+    /// ===== CANCEL =====
 if (data.startsWith("cancel_")) {
   const orderId = data.split("_")[1];
 
@@ -425,7 +424,6 @@ if (data.startsWith("cancel_")) {
     payment_status: "pending"
   }).eq("id", Number(orderId));
 
-  // 🔥 clear offers
   await supabase.from("offers")
     .delete()
     .eq("order_id", orderId);
@@ -437,11 +435,15 @@ if (data.startsWith("cancel_")) {
     "❌ You cancelled the task. You can accept new tasks.");
 
   return bot.answerCallbackQuery(q.id);
+}
+
+// ✅ CLOSE TRY BLOCK HERE
 } catch (err) {
   console.log("❌ ERROR:", err.message);
 }
-}); // ✅ THIS closes bot.on("callback_query")
 
+// ✅ CLOSE CALLBACK HERE
+});
 // ================= SERVER =================
 app.listen(3000, () => {
   console.log("🌐 Server running on port 3000");
