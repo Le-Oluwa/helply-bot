@@ -642,10 +642,15 @@ if (data.startsWith("cancel_")) {
     }
   );
 
-  return bot.answerCallbackQuery(q.id, {
+    return bot.answerCallbackQuery(q.id, {
     text: "Task cancelled"
   });
 }
+
+} catch (err) {
+  console.log("❌ ERROR:", err.message);
+}
+});
 
 // ================= SERVER =================
 app.listen(3000, () => {
