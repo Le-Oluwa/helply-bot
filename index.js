@@ -24,9 +24,10 @@ console.log("🚀 Helply Running");
 async function isBusy(userId) {
   const { data } = await supabase
     .from("orders")
-    .select("id")
+    .select("id, status")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"]);
+    .in("status", ["matched", "in_progress"])
+    .limit(1);
 
   return data && data.length > 0;
 }
@@ -183,7 +184,13 @@ bot.on("message", async (msg) => {
   if (await isBusy(userId)) {
     return bot.sendMessage(userId, "❌ Finish current task first");
   }
-
+  
+// 🔥 CLEAN ANY STALE TASKS
+await supabase.from("orders")
+  .update({ status: "completed" })
+  .eq("user_id", userId)
+  .in("status", ["matched", "in_progress"]);
+  
   // CREATE ORDER
   const taskId = Date.now();
 
@@ -235,18 +242,31 @@ bot.on("callback_query", async (q) => {
 
     // ===== END =====
     if (data.startsWith("end_")) {
-      const orderId = data.split("_")[1];
+  const orderId = data.split("_")[1];
 
-      await supabase.from("orders").update({
-        status: "completed",
-        payment_status: "completed"
-      }).eq("id", Number(orderId));
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(orderId))
+    .maybeSingle();
 
-      await bot.sendMessage(userId, "✅ Task completed");
+  if (!order) return;
 
-      return bot.answerCallbackQuery(q.id);
-    }
+  // ✅ force full cleanup
+  await supabase.from("orders").update({
+    status: "completed",
+    payment_status: "completed",
+    runner_id: null
+  }).eq("id", Number(orderId));
 
+  await bot.sendMessage(order.user_id,
+"✅ Task completed. You can send a new request.");
+
+  await bot.sendMessage(order.runner_id,
+"✅ Task completed. You can accept new tasks.");
+
+  return bot.answerCallbackQuery(q.id);
+}
     // ===== OFFER =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
@@ -386,23 +406,37 @@ bot.on("callback_query", async (q) => {
     }
 
     // ===== CANCEL =====
-    if (data.startsWith("cancel_")) {
-      const orderId = data.split("_")[1];
+  if (data.startsWith("cancel_")) {
+  const orderId = data.split("_")[1];
 
-      await supabase.from("orders").update({
-        runner_id: null,
-        status: "open"
-      }).eq("id", Number(orderId));
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(orderId))
+    .maybeSingle();
 
-      await supabase.from("offers").delete().eq("order_id", orderId);
+  if (!order) return;
 
-      return bot.sendMessage(userId, "❌ Cancelled");
-    }
+  await supabase.from("orders").update({
+    runner_id: null,
+    runner_username: null,
+    status: "open",
+    payment_status: "pending"
+  }).eq("id", Number(orderId));
 
-  } catch (err) {
-    console.log("ERROR:", err.message);
-  }
-});
+  // 🔥 clear offers
+  await supabase.from("offers")
+    .delete()
+    .eq("order_id", orderId);
+
+  await bot.sendMessage(order.user_id,
+"⚠️ Runner cancelled. New runners can offer.");
+
+  await bot.sendMessage(order.runner_id,
+"❌ You cancelled the task. You can accept new tasks.");
+
+  return bot.answerCallbackQuery(q.id);
+}
 
 // ================= SERVER =================
 app.listen(3000, () => {
