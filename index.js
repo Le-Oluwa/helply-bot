@@ -406,7 +406,8 @@ bot.on("callback_query", async (q) => {
     }
 
     // ===== CANCEL =====
-  if (data.startsWith("cancel_")) {
+    // ===== CANCEL =====
+if (data.startsWith("cancel_")) {
   const orderId = data.split("_")[1];
 
   const { data: order } = await supabase
@@ -430,10 +431,10 @@ bot.on("callback_query", async (q) => {
     .eq("order_id", orderId);
 
   await bot.sendMessage(order.user_id,
-"⚠️ Runner cancelled. New runners can offer.");
+    "⚠️ Runner cancelled. New runners can offer.");
 
   await bot.sendMessage(order.runner_id,
-"❌ You cancelled the task. You can accept new tasks.");
+    "❌ You cancelled the task. You can accept new tasks.");
 
   return bot.answerCallbackQuery(q.id);
 } catch (err) {
