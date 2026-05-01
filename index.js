@@ -30,7 +30,7 @@ async function isUserBusy(userId) {
   return data && data.length > 0;
 }
 
-// ================= PAYMENT SUCCESS =================
+/// ================= PAYMENT SUCCESS =================
 app.post("/payment-success", async (req, res) => {
   try {
     const { orderId } = req.body;
@@ -50,26 +50,48 @@ app.post("/payment-success", async (req, res) => {
       return res.status(404).send("Order not found");
     }
 
-    // update order
+    // ✅ update order
     await supabase.from("orders").update({
       payment_status: "paid",
       status: "in_progress"
     }).eq("id", Number(orderId));
 
-    // notify user
+    // ✅ notify USER (with END button)
     await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
-You can now chat with:
-${order.runner_username ? "@" + order.runner_username : "your runner"}`);
+You are now chatting with:
+${order.runner_username ? "@" + order.runner_username : "your runner"}
 
-    // notify runner
+💬 Send messages to start.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+        ]
+      }
+    }
+    );
+
+    // ✅ notify RUNNER (with END button)
     await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
-Contact the user now 🚀`);
+You are now chatting with:
+${order.user_username ? "@" + order.user_username : "the user"}
+
+🚀 Start the task.`,
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+        ]
+      }
+    }
+    );
 
     return res.send("OK");
+
   } catch (err) {
     console.log("PAYMENT SUCCESS ERROR:", err);
     return res.status(500).send("Server error");
@@ -306,6 +328,32 @@ bot.on("callback_query", async (q) => {
         .eq("id", userId);
 
       return bot.sendMessage(userId, "🎉 You're in!");
+    }
+        // ===== END CHAT =====
+    if (data.startsWith("end_")) {
+      const orderId = data.split("_")[1];
+
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", Number(orderId))
+        .maybeSingle();
+
+      if (!order) return;
+
+      await supabase.from("orders")
+        .update({ status: "completed" })
+        .eq("id", Number(orderId));
+
+      await bot.sendMessage(order.user_id,
+        "✅ Chat ended. You can now send a new request.");
+
+      await bot.sendMessage(order.runner_id,
+        "✅ Task completed. You can now accept new tasks.");
+
+      return bot.answerCallbackQuery(q.id, {
+        text: "Chat ended"
+      });
     }
 
     // ===== OFFER =====
