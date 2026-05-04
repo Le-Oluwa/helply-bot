@@ -57,17 +57,17 @@ app.post("/payment-success", async (req, res) => {
     const runnerTag = order.runner_username ? "@" + order.runner_username : "Runner";
     const userTag = order.user_username ? "@" + order.user_username : "User";
 
-    await bot.sendMessage(order.user_id,
-`✅ Payment confirmed!
+    await bot.sendMessage(order.runner_id,
+`💰 Payment received!
 
-🤝 You are now chatting with ${runnerTag}`, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-        ]
-      }
-    });
-
+🤝 You are now chatting with ${userTag}`, {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: "❌ Cancel Task", callback_data: `cancel_${order.id}` }],
+      [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
+    ]
+  }
+});
     if (order.runner_id) {
       await bot.sendMessage(order.runner_id,
 `💰 Payment received!
@@ -288,34 +288,34 @@ bot.on("callback_query", async (q) => {
     }
 
     // ===== END =====
-    if (data.startsWith("end_")) {
-      const orderId = data.split("_")[1];
+   if (data.startsWith("end_")) {
+  const orderId = data.split("_")[1];
 
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", Number(orderId))
-        .maybeSingle();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(orderId))
+    .maybeSingle();
 
-      if (!order) return;
+  if (!order) return;
 
-      const runnerId = order.runner_id;
+  const runnerId = order.runner_id;
 
-      await supabase.from("orders").update({
-        status: "completed",
-        payment_status: "completed",
-        runner_id: null
-      }).eq("id", Number(orderId));
+  await supabase.from("orders").update({
+    status: "completed",
+    payment_status: "completed"
+  }).eq("id", Number(orderId));
 
-      await bot.sendMessage(order.user_id, "✅ Task completed.");
+  await bot.sendMessage(order.user_id,
+    "✅ Task completed successfully!");
 
-      if (runnerId) {
-        await bot.sendMessage(runnerId, "✅ Task completed.");
-      }
+  if (runnerId) {
+    await bot.sendMessage(runnerId,
+      "🎉 You completed the task!");
+  }
 
-      return bot.answerCallbackQuery(q.id);
-    }
-
+  return bot.answerCallbackQuery(q.id);
+}
     // ===== OFFER =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
@@ -439,55 +439,95 @@ bot.on("callback_query", async (q) => {
     }
 
     // ===== ACCEPT =====
-    if (data.startsWith("accept_")) {
-      const id = data.split("_")[1];
-const { data: o, error } = await supabase
-  .from("offers")
-  .select("*")
-  .eq("id", id)
-  .maybeSingle();
+if (data.startsWith("accept_")) {
+  const id = data.split("_")[1];
 
-if (error || !o) {
-  console.log("OFFER FETCH ERROR:", error?.message);
-  return bot.answerCallbackQuery(q.id, {
-    text: "❌ Offer not found",
-    show_alert: true
+  // 🔹 GET OFFER
+  const { data: o, error } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !o) {
+    console.log("OFFER FETCH ERROR:", error?.message);
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Offer not found",
+      show_alert: true
+    });
+  }
+
+  // 🔹 CHECK ORDER STATE
+  const { data: existingOrder } = await supabase
+    .from("orders")
+    .select("status")
+    .eq("id", Number(o.order_id))
+    .maybeSingle();
+
+  if (!existingOrder || existingOrder.status !== "open") {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Task already taken",
+      show_alert: true
+    });
+  }
+
+  // 🔹 VALIDATE PRICE
+  const runnerFee = Number(o.current_price);
+  if (!runnerFee || runnerFee <= 0) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Invalid price",
+      show_alert: true
+    });
+  }
+
+  // 🔥 PRICING
+  const runnerPayout = Math.round(runnerFee * 0.9);
+  const userPrice = Math.round(runnerFee * 1.3);
+
+  // 🔹 UPDATE ORDER FIRST (IMPORTANT)
+  const { error: updateError } = await supabase
+    .from("orders")
+    .update({
+      runner_id: o.runner_id,
+      runner_username: o.runner_username,
+      agreed_price: runnerFee,
+      runner_payout: runnerPayout,
+      total_price: userPrice,
+      status: "matched"
+    })
+    .eq("id", Number(o.order_id));
+
+  if (updateError) {
+    console.log("ORDER UPDATE ERROR:", updateError.message);
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Failed to assign task",
+      show_alert: true
+    });
+  }
+
+  // 🔹 DELETE OTHER OFFERS (AFTER SUCCESS)
+  await supabase.from("offers")
+    .delete()
+    .eq("order_id", String(o.order_id));
+
+  const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
+
+  // 🔹 INFORM RUNNER
+  await bot.sendMessage(o.runner_id,
+`📦 Task assigned
+
+💰 Your earning: ₦${runnerPayout}
+
+Waiting for user payment...`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]
+      ]
+    }
   });
-}
 
-// ✅ Validate price
-const runnerFee = Number(o.current_price);
-if (!runnerFee || runnerFee <= 0) {
-  return bot.answerCallbackQuery(q.id, {
-    text: "❌ Invalid price",
-    show_alert: true
-  });
-}
-
-// 🔥 PRICING LOGIC
-const runnerPayout = Math.round(runnerFee * 0.9); // runner gets 90%
-const userPrice = Math.round(runnerFee * 1.3);   // user pays +30%
-
-// ✅ Delete other offers
-await supabase.from("offers")
-  .delete()
-  .eq("order_id", String(o.order_id));
-
-// ✅ Update order with FULL pricing
-await supabase.from("orders").update({
-  runner_id: o.runner_id,
-  runner_username: o.runner_username,
-  agreed_price: runnerFee,
-  runner_payout: runnerPayout,
-  total_price: userPrice,
-  status: "matched"
-}).eq("id", Number(o.order_id));
-
-// ✅ Payment link
-const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
-
-// ✅ Better message (VERY IMPORTANT)
-await bot.sendMessage(o.user_id,
+  // 🔹 INFORM USER
+  await bot.sendMessage(o.user_id,
 `💳 Payment Required
 
 💰 Task Price: ₦${runnerFee}
@@ -496,49 +536,51 @@ await bot.sendMessage(o.user_id,
 
 👉 Pay here:
 ${link}`
-);
+  );
 
-return bot.answerCallbackQuery(q.id);
-    }
+  return bot.answerCallbackQuery(q.id, {
+    text: "✅ Task assigned successfully"
+  });
+}
 
     // ===== CANCEL =====
     if (data.startsWith("cancel_")) {
-      const orderId = data.split("_")[1];
+  const orderId = data.split("_")[1];
 
-      const { data: order } = await supabase
-        .from("orders")
-        .select("*")
-        .eq("id", Number(orderId))
-        .maybeSingle();
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(orderId))
+    .maybeSingle();
 
-      if (!order) return;
+  if (!order) return;
 
-      await supabase.from("orders").update({
-        runner_id: null,
-        runner_username: null,
-        status: "open",
-        payment_status: "pending"
-      }).eq("id", Number(orderId));
+  // ✅ Reset order
+  await supabase.from("orders").update({
+    runner_id: null,
+    runner_username: null,
+    status: "open",
+    payment_status: "pending",
+    agreed_price: null,
+    total_price: null,
+    runner_payout: null
+  }).eq("id", Number(orderId));
 
-      await supabase.from("offers")
-        .delete()
-        .eq("order_id", orderId);
+  // ✅ Delete offers
+  await supabase.from("offers")
+    .delete()
+    .eq("order_id", orderId);
 
-      await bot.sendMessage(order.user_id,
-        "⚠️ Runner cancelled. New runners can offer.");
+  await bot.sendMessage(order.user_id,
+    "⚠️ Runner cancelled. New runners can offer.");
 
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id,
-          "❌ You cancelled the task.");
-      }
-
-      return bot.answerCallbackQuery(q.id);
-    }
-
-  } catch (err) {
-    console.log("❌ ERROR:", err.message);
+  if (order.runner_id) {
+    await bot.sendMessage(order.runner_id,
+      "❌ Task cancelled successfully.");
   }
-});
+
+  return bot.answerCallbackQuery(q.id);
+}
 
 // ================= SERVER =================
 app.listen(3000, () => {
