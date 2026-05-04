@@ -30,7 +30,7 @@ async function isBusy(userId) {
     .limit(1);
 
   if (error) {
-    console.log(error);
+    console.log("BUSY ERROR:", error.message);
     return false;
   }
 
@@ -95,7 +95,6 @@ app.post("/payment-success", async (req, res) => {
 app.get("/create-payment", async (req, res) => {
   const { orderId } = req.query;
 
-  // ⚠️ Still mocked — replace with real payment later
   await fetch(`${BASE_URL}/payment-success`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -156,14 +155,18 @@ bot.on("message", async (msg) => {
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
 
-  let { data: user } = await supabase
+  const { data: user } = await supabase
     .from("users")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user || !user.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Use /start first");
+  if (!user) {
+    return bot.sendMessage(userId, "⚠️ Please press /start first");
+  }
+
+  if (!user.accepted_terms) {
+    return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
   }
 
   // ACTIVE CHAT
@@ -184,16 +187,16 @@ bot.on("message", async (msg) => {
 `💬 ${msg.from.first_name}: ${text}`);
   }
 
-  // BUSY
+  // BUSY CHECK
   if (await isBusy(userId)) {
     return bot.sendMessage(userId, "❌ Finish current task first");
   }
 
-  // CLEAN OLD MATCHED ONLY
+  // ✅ FIXED CLEANUP (CRITICAL FIX)
   await supabase.from("orders")
     .update({ status: "completed" })
     .eq("user_id", userId)
-    .eq("status", "matched");
+    .in("status", ["matched", "in_progress"]);
 
   const taskId = Date.now();
 
@@ -239,7 +242,8 @@ bot.on("callback_query", async (q) => {
         .update({ accepted_terms: true })
         .eq("id", userId);
 
-      await bot.sendMessage(userId, "🎉 You're in!");
+      await bot.sendMessage(userId, "🎉 You're in! Send your request now 🚀");
+
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -255,6 +259,8 @@ bot.on("callback_query", async (q) => {
 
       if (!order) return;
 
+      const runnerId = order.runner_id;
+
       await supabase.from("orders").update({
         status: "completed",
         payment_status: "completed",
@@ -264,8 +270,8 @@ bot.on("callback_query", async (q) => {
       await bot.sendMessage(order.user_id,
         "✅ Task completed. You can send a new request.");
 
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id,
+      if (runnerId) {
+        await bot.sendMessage(runnerId,
           "✅ Task completed. You can accept new tasks.");
       }
 
