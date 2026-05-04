@@ -68,44 +68,49 @@ Please accept terms`, {
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
 
-  const userId = msg.from.id.toString();
-  const text = msg.text;
+  const userId = msg.from.id.toString();   // ✅ REQUIRED
+  const text = msg.text;                   // ✅ REQUIRED
 
   const { data: user } = await supabase
     .from("users")
     .select("*")
     .eq("id", userId)
     .maybeSingle();
-  
+
   console.log("USER CHECK:", {
-  userId,
-  exists: !!user
-});
+    userId,
+    exists: !!user
+  });
 
-  // 🔥 AUTO FIX USER (NO MORE /start BLOCKING)
-let currentUser = user;
+  // 🔥 FIXED AUTO USER HANDLING
+  let currentUser = user;
 
-if (!currentUser) {
-  console.log("⚠️ Auto-creating user:", userId);
+  if (!currentUser) {
+    console.log("⚠️ Auto-creating user:", userId);
 
-  const { data: newUser } = await supabase
-    .from("users")
-    .insert([{
+    const { error } = await supabase
+      .from("users")
+      .insert([{
+        id: userId,
+        username: msg.from.username || "",
+        accepted_terms: true
+      }]);
+
+    if (error) {
+      console.log("INSERT ERROR:", error.message);
+      return bot.sendMessage(userId, "❌ Error creating account");
+    }
+
+    currentUser = {
       id: userId,
-      username: msg.from.username || "",
-      accepted_terms: true // or false if you want strict flow
-    }])
-    .select()
-    .maybeSingle();
+      accepted_terms: true
+    };
+  }
 
-  currentUser = newUser;
-}
-
-// STILL enforce terms if you want
-if (!currentUser.accepted_terms) {
-  return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
-}
-
+  // ✅ SAFE CHECK
+  if (!currentUser.accepted_terms) {
+    return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
+  }
   // ACTIVE CHAT
   const { data: active } = await supabase
     .from("orders")
