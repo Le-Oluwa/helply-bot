@@ -26,20 +26,22 @@ async function isBusy(userId) {
     .from("orders")
     .select("id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"]); // ✅ FIXED
+    .in("status", ["matched", "in_progress"]);
 
   if (error) {
     console.log("BUSY ERROR:", error.message);
     return false;
   }
 
-  return data.length > 0;
+  return data && data.length > 0;
 }
 
 // ================= PAYMENT SUCCESS =================
-app.post("/payment-success", async (req, res) => {
+app.all("/payment-success", async (req, res) => {
   try {
-    const { orderId } = req.body;
+    const orderId = req.body.orderId || req.query.orderId;
+
+    if (!orderId) return res.send("❌ Missing orderId");
 
     const { data: order } = await supabase
       .from("orders")
@@ -54,20 +56,9 @@ app.post("/payment-success", async (req, res) => {
       status: "in_progress"
     }).eq("id", Number(orderId));
 
-    const runnerTag = order.runner_username ? "@" + order.runner_username : "Runner";
     const userTag = order.user_username ? "@" + order.user_username : "User";
+    const runnerTag = order.runner_username ? "@" + order.runner_username : "Runner";
 
-    await bot.sendMessage(order.runner_id,
-`💰 Payment received!
-
-🤝 You are now chatting with ${userTag}`, {
-  reply_markup: {
-    inline_keyboard: [
-      [{ text: "❌ Cancel Task", callback_data: `cancel_${order.id}` }],
-      [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
-    ]
-  }
-});
     if (order.runner_id) {
       await bot.sendMessage(order.runner_id,
 `💰 Payment received!
@@ -75,17 +66,28 @@ app.post("/payment-success", async (req, res) => {
 🤝 You are now chatting with ${userTag}`, {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "❌ Cancel", callback_data: `cancel_${order.id}` }],
-            [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${order.id}` }],
+            [{ text: "✅ End Task", callback_data: `end_${order.id}` }]
           ]
         }
       });
     }
 
+    await bot.sendMessage(order.user_id,
+`✅ Payment confirmed!
+
+🤝 You are now chatting with ${runnerTag}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+        ]
+      }
+    });
+
     res.send("OK");
 
   } catch (err) {
-    console.log("PAYMENT ERROR:", err);
+    console.log("PAYMENT ERROR:", err.message);
     res.sendStatus(500);
   }
 });
@@ -93,12 +95,9 @@ app.post("/payment-success", async (req, res) => {
 // ================= CREATE PAYMENT =================
 app.get("/create-payment", async (req, res) => {
   try {
-   const orderId = req.body.orderId || req.query.orderId;
+    const orderId = req.query.orderId;
 
-    // ✅ Validate orderId
-    if (!orderId) {
-      return res.send("❌ Missing order ID");
-    }
+    if (!orderId) return res.send("❌ Missing order ID");
 
     const { data: order, error } = await supabase
       .from("orders")
@@ -107,49 +106,36 @@ app.get("/create-payment", async (req, res) => {
       .maybeSingle();
 
     if (error) {
-      console.log("FETCH ERROR:", error.message);
+      console.log(error.message);
       return res.send("❌ Error fetching order");
     }
 
-    // ✅ Validate order
     if (!order || !order.total_price) {
-      return res.send("❌ Invalid order amount. Recreate order.");
+      return res.send("❌ Invalid order amount");
     }
 
-    // ✅ Prevent double payment
     if (order.payment_status === "paid") {
-      return res.send("✅ This order is already paid.");
+      return res.send("✅ Already paid");
     }
 
-    if (order.status === "in_progress") {
-      return res.send("⚠️ Order already in progress.");
-    }
-
-    const amount = order.total_price * 100; // (for real payment later)
-
-    // ✅ Clean payment UI
     return res.send(`
-      <div style="font-family:sans-serif;text-align:center;margin-top:50px">
+      <div style="text-align:center;margin-top:50px;font-family:sans-serif">
         <h2>💳 Payment</h2>
-        <p><strong>Task Price:</strong> ₦${order.agreed_price || 0}</p>
-        <p><strong>Service Fee:</strong> ₦${(order.total_price - order.agreed_price) || 0}</p>
+        <p>Task Price: ₦${order.agreed_price}</p>
+        <p>Service Fee: ₦${order.total_price - order.agreed_price}</p>
         <h3>Total: ₦${order.total_price}</h3>
-
-        <br/>
-
         <a href="${BASE_URL}/payment-success?orderId=${order.id}">
-          <button style="padding:10px 20px;font-size:16px;">
-            Pay Now
-          </button>
+          <button style="padding:10px 20px;font-size:16px;">Pay Now</button>
         </a>
       </div>
     `);
 
   } catch (err) {
     console.log("PAYMENT PAGE ERROR:", err.message);
-    return res.send("❌ Something went wrong");
+    res.send("❌ Error");
   }
 });
+
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id.toString();
@@ -207,33 +193,26 @@ bot.on("message", async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user) return bot.sendMessage(userId, "⚠️ Please press /start first");
-  if (!user.accepted_terms) return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
+  if (!user || !user.accepted_terms) return;
 
-  // ACTIVE CHAT
-  const { data: activeOrder } = await supabase
+  const { data: active } = await supabase
     .from("orders")
     .select("*")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
     .eq("status", "in_progress")
     .maybeSingle();
 
-  if (activeOrder) {
+  if (active) {
     const receiver =
-      userId === activeOrder.user_id
-        ? activeOrder.runner_id
-        : activeOrder.user_id;
-
+      userId === active.user_id ? active.runner_id : active.user_id;
     return bot.sendMessage(receiver, `💬 ${msg.from.first_name}: ${text}`);
   }
 
-  // ✅ CLEANUP FIRST (USER + RUNNER)
   await supabase.from("orders")
     .update({ status: "completed" })
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
     .in("status", ["matched", "in_progress"]);
 
-  // BUSY CHECK
   if (await isBusy(userId)) {
     return bot.sendMessage(userId, "❌ Finish current task first");
   }
@@ -251,25 +230,19 @@ bot.on("message", async (msg) => {
 
   await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-  try {
-    await bot.sendMessage(
-      RUNNER_GROUP_ID,
+  await bot.sendMessage(RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
 📌 ${text}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
-          ]
-        }
-      }
-    );
-  } catch (err) {
-    console.log("GROUP ERROR:", err.message);
-  }
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
+      ]
+    }
+  });
 
-}); // ✅ FIXED (message handler properly closed)
+});
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
@@ -283,44 +256,55 @@ bot.on("callback_query", async (q) => {
         .update({ accepted_terms: true })
         .eq("id", userId);
 
-      await bot.sendMessage(userId, "🎉 You're in! Send your request now 🚀");
+      await bot.sendMessage(userId, "🎉 You're in!");
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ===== END =====
-   if (data.startsWith("end_")) {
-  const orderId = data.split("_")[1];
+    if (data.startsWith("end_")) {
+      const orderId = data.split("_")[1];
 
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(orderId))
-    .maybeSingle();
+      await supabase.from("orders")
+        .update({ status: "completed", payment_status: "completed" })
+        .eq("id", Number(orderId));
 
-  if (!order) return;
+      await bot.sendMessage(userId, "✅ Task completed!");
+      return bot.answerCallbackQuery(q.id);
+    }
 
-  const runnerId = order.runner_id;
+    if (data.startsWith("cancel_")) {
+      const orderId = data.split("_")[1];
 
-  await supabase.from("orders").update({
-    status: "completed",
-    payment_status: "completed"
-  }).eq("id", Number(orderId));
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", Number(orderId))
+        .maybeSingle();
 
-  await bot.sendMessage(order.user_id,
-    "✅ Task completed successfully!");
+      if (!order) return;
 
-  if (runnerId) {
-    await bot.sendMessage(runnerId,
-      "🎉 You completed the task!");
-  }
+      await supabase.from("orders").update({
+        runner_id: null,
+        runner_username: null,
+        status: "open",
+        payment_status: "pending",
+        agreed_price: null,
+        total_price: null,
+        runner_payout: null
+      }).eq("id", Number(orderId));
 
-  return bot.answerCallbackQuery(q.id);
-}
-    // ===== OFFER =====
+      await supabase.from("offers")
+        .delete()
+        .eq("order_id", orderId);
+
+      await bot.sendMessage(order.user_id, "⚠️ Runner cancelled.");
+
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // OFFER FLOW
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
 
-      // ✅ CLEAN runner stale tasks
       await supabase.from("orders")
         .update({ status: "completed" })
         .eq("runner_id", userId)
@@ -334,9 +318,7 @@ bot.on("callback_query", async (q) => {
       }
 
       await bot.sendMessage(userId,
-`💰 Set your offer
-
-₦${price}`, {
+`💰 Set your offer ₦${price}`, {
         reply_markup: {
           inline_keyboard: [
             [{ text: "+100", callback_data: `adj_${taskId}_${price}_100` }],
@@ -349,7 +331,6 @@ bot.on("callback_query", async (q) => {
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ===== ADJUST =====
     if (data.startsWith("adj_")) {
       const [_, taskId, current, change] = data.split("_");
 
@@ -371,7 +352,6 @@ bot.on("callback_query", async (q) => {
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ===== SUBMIT =====
     if (data.startsWith("submit_")) {
       const [_, taskId, price] = data.split("_");
 
@@ -409,7 +389,6 @@ bot.on("callback_query", async (q) => {
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ===== VIEW =====
     if (data.startsWith("view_")) {
       const id = data.split("_")[1];
 
@@ -419,12 +398,7 @@ bot.on("callback_query", async (q) => {
         .eq("id", id)
         .maybeSingle();
 
-      if (!o) {
-        return bot.answerCallbackQuery(q.id, {
-          text: "❌ Offer not found",
-          show_alert: true
-        });
-      }
+      if (!o) return;
 
       await bot.sendMessage(userId,
 `${o.runner_name} — ₦${o.current_price}`, {
@@ -438,149 +412,59 @@ bot.on("callback_query", async (q) => {
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ===== ACCEPT =====
-if (data.startsWith("accept_")) {
-  const id = data.split("_")[1];
+    if (data.startsWith("accept_")) {
+      const id = data.split("_")[1];
 
-  // 🔹 GET OFFER
-  const { data: o, error } = await supabase
-    .from("offers")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
+      const { data: o } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
 
-  if (error || !o) {
-    console.log("OFFER FETCH ERROR:", error?.message);
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Offer not found",
-      show_alert: true
-    });
-  }
+      if (!o) return;
 
-  // 🔹 CHECK ORDER STATE
-  const { data: existingOrder } = await supabase
-    .from("orders")
-    .select("status")
-    .eq("id", Number(o.order_id))
-    .maybeSingle();
+      const runnerFee = Number(o.current_price);
+      const runnerPayout = Math.round(runnerFee * 0.9);
+      const userPrice = Math.round(runnerFee * 1.3);
 
-  if (!existingOrder || existingOrder.status !== "open") {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Task already taken",
-      show_alert: true
-    });
-  }
+      await supabase.from("orders").update({
+        runner_id: o.runner_id,
+        runner_username: o.runner_username,
+        agreed_price: runnerFee,
+        runner_payout: runnerPayout,
+        total_price: userPrice,
+        status: "matched"
+      }).eq("id", Number(o.order_id));
 
-  // 🔹 VALIDATE PRICE
-  const runnerFee = Number(o.current_price);
-  if (!runnerFee || runnerFee <= 0) {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Invalid price",
-      show_alert: true
-    });
-  }
+      await supabase.from("offers")
+        .delete()
+        .eq("order_id", String(o.order_id));
 
-  // 🔥 PRICING
-  const runnerPayout = Math.round(runnerFee * 0.9);
-  const userPrice = Math.round(runnerFee * 1.3);
+      const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
-  // 🔹 UPDATE ORDER FIRST (IMPORTANT)
-  const { error: updateError } = await supabase
-    .from("orders")
-    .update({
-      runner_id: o.runner_id,
-      runner_username: o.runner_username,
-      agreed_price: runnerFee,
-      runner_payout: runnerPayout,
-      total_price: userPrice,
-      status: "matched"
-    })
-    .eq("id", Number(o.order_id));
-
-  if (updateError) {
-    console.log("ORDER UPDATE ERROR:", updateError.message);
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Failed to assign task",
-      show_alert: true
-    });
-  }
-
-  // 🔹 DELETE OTHER OFFERS (AFTER SUCCESS)
-  await supabase.from("offers")
-    .delete()
-    .eq("order_id", String(o.order_id));
-
-  const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
-
-  // 🔹 INFORM RUNNER
-  await bot.sendMessage(o.runner_id,
+      await bot.sendMessage(o.runner_id,
 `📦 Task assigned
 
-💰 Your earning: ₦${runnerPayout}
+💰 You earn: ₦${runnerPayout}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]
+          ]
+        }
+      });
 
-Waiting for user payment...`, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]
-      ]
+      await bot.sendMessage(o.user_id,
+`💳 Pay ₦${userPrice}
+
+${link}`);
+
+      return bot.answerCallbackQuery(q.id);
     }
-  });
 
-  // 🔹 INFORM USER
-  await bot.sendMessage(o.user_id,
-`💳 Payment Required
-
-💰 Task Price: ₦${runnerFee}
-📈 Service Fee: ₦${userPrice - runnerFee}
-🧾 Total: ₦${userPrice}
-
-👉 Pay here:
-${link}`
-  );
-
-  return bot.answerCallbackQuery(q.id, {
-    text: "✅ Task assigned successfully"
-  });
-}
-
-    // ===== CANCEL =====
-    if (data.startsWith("cancel_")) {
-  const orderId = data.split("_")[1];
-
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(orderId))
-    .maybeSingle();
-
-  if (!order) return;
-
-  // ✅ Reset order
-  await supabase.from("orders").update({
-    runner_id: null,
-    runner_username: null,
-    status: "open",
-    payment_status: "pending",
-    agreed_price: null,
-    total_price: null,
-    runner_payout: null
-  }).eq("id", Number(orderId));
-
-  // ✅ Delete offers
-  await supabase.from("offers")
-    .delete()
-    .eq("order_id", orderId);
-
-  await bot.sendMessage(order.user_id,
-    "⚠️ Runner cancelled. New runners can offer.");
-
-  if (order.runner_id) {
-    await bot.sendMessage(order.runner_id,
-      "❌ Task cancelled successfully.");
+  } catch (err) {
+    console.log("❌ ERROR:", err.message);
   }
-
-  return bot.answerCallbackQuery(q.id);
-}
+}); // ✅ THIS WAS MISSING → FIXES CRASH
 
 // ================= SERVER =================
 app.listen(3000, () => {
