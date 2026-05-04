@@ -77,8 +77,29 @@ bot.on("message", async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user) return bot.sendMessage(userId, "Use /start");
-  if (!user.accepted_terms) return bot.sendMessage(userId, "Accept terms first");
+  // 🔥 AUTO FIX USER (NO MORE /start BLOCKING)
+let currentUser = user;
+
+if (!currentUser) {
+  console.log("⚠️ Auto-creating user:", userId);
+
+  const { data: newUser } = await supabase
+    .from("users")
+    .insert([{
+      id: userId,
+      username: msg.from.username || "",
+      accepted_terms: true // or false if you want strict flow
+    }])
+    .select()
+    .maybeSingle();
+
+  currentUser = newUser;
+}
+
+// STILL enforce terms if you want
+if (!currentUser.accepted_terms) {
+  return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
+}
 
   // ACTIVE CHAT
   const { data: active } = await supabase
