@@ -26,7 +26,7 @@ async function isBusy(userId) {
     .from("orders")
     .select("id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .neq("status", "completed"); // ✅ better logic
+    .in("status", ["matched", "in_progress"]); // ✅ FIXED
 
   if (error) {
     console.log("BUSY ERROR:", error.message);
@@ -160,13 +160,8 @@ bot.on("message", async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
-  if (!user) {
-    return bot.sendMessage(userId, "⚠️ Please press /start first");
-  }
-
-  if (!user.accepted_terms) {
-    return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
-  }
+  if (!user) return bot.sendMessage(userId, "⚠️ Please press /start first");
+  if (!user.accepted_terms) return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
 
   // ACTIVE CHAT
   const { data: activeOrder } = await supabase
@@ -182,52 +177,52 @@ bot.on("message", async (msg) => {
         ? activeOrder.runner_id
         : activeOrder.user_id;
 
-    return bot.sendMessage(receiver,
-`💬 ${msg.from.first_name}: ${text}`);
+    return bot.sendMessage(receiver, `💬 ${msg.from.first_name}: ${text}`);
   }
 
-  // ✅ CLEANUP FIRST (CRITICAL FIX)
-await supabase.from("orders")
-  .update({ status: "completed" })
-  .or(`user_id.eq.${userId},runner_id.eq.${userId}`) // 🔥 include runner too
-  .in("status", ["matched", "in_progress"]);
+  // ✅ CLEANUP FIRST (USER + RUNNER)
+  await supabase.from("orders")
+    .update({ status: "completed" })
+    .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
+    .in("status", ["matched", "in_progress"]);
 
-// ✅ THEN BUSY CHECK
-if (await isBusy(userId)) {
-  return bot.sendMessage(userId, "❌ Finish current task first");
-}
+  // BUSY CHECK
+  if (await isBusy(userId)) {
+    return bot.sendMessage(userId, "❌ Finish current task first");
+  }
 
-// CREATE ORDER
-const taskId = Date.now();
+  const taskId = Date.now();
 
-await supabase.from("orders").insert([{
-  id: taskId,
-  user_id: userId,
-  user_username: msg.from.username || "",
-  delivery_location: text,
-  status: "open",
-  payment_status: "pending"
-}]);
+  await supabase.from("orders").insert([{
+    id: taskId,
+    user_id: userId,
+    user_username: msg.from.username || "",
+    delivery_location: text,
+    status: "open",
+    payment_status: "pending"
+  }]);
 
-await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
+  await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-try {
-  await bot.sendMessage(
-    RUNNER_GROUP_ID,
+  try {
+    await bot.sendMessage(
+      RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
 📌 ${text}`, {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
-        ]
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
+          ]
+        }
       }
-    }
-  );
-} catch (err) {
-  console.log("GROUP ERROR:", err.message);
-}
+    );
+  } catch (err) {
+    console.log("GROUP ERROR:", err.message);
+  }
+
+}); // ✅ FIXED (message handler properly closed)
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
@@ -242,7 +237,6 @@ bot.on("callback_query", async (q) => {
         .eq("id", userId);
 
       await bot.sendMessage(userId, "🎉 You're in! Send your request now 🚀");
-
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -266,12 +260,10 @@ bot.on("callback_query", async (q) => {
         runner_id: null
       }).eq("id", Number(orderId));
 
-      await bot.sendMessage(order.user_id,
-        "✅ Task completed. You can send a new request.");
+      await bot.sendMessage(order.user_id, "✅ Task completed.");
 
       if (runnerId) {
-        await bot.sendMessage(runnerId,
-          "✅ Task completed. You can accept new tasks.");
+        await bot.sendMessage(runnerId, "✅ Task completed.");
       }
 
       return bot.answerCallbackQuery(q.id);
@@ -280,6 +272,12 @@ bot.on("callback_query", async (q) => {
     // ===== OFFER =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
+
+      // ✅ CLEAN runner stale tasks
+      await supabase.from("orders")
+        .update({ status: "completed" })
+        .eq("runner_id", userId)
+        .in("status", ["matched", "in_progress"]);
 
       if (await isBusy(userId)) {
         return bot.answerCallbackQuery(q.id, {
