@@ -76,6 +76,11 @@ bot.on("message", async (msg) => {
     .select("*")
     .eq("id", userId)
     .maybeSingle();
+  
+  console.log("USER CHECK:", {
+  userId,
+  exists: !!user
+});
 
   // 🔥 AUTO FIX USER (NO MORE /start BLOCKING)
 let currentUser = user;
