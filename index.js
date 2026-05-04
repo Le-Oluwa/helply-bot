@@ -22,12 +22,17 @@ console.log("🚀 Helply Running");
 
 // ================= HELPER =================
 async function isBusy(userId) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("orders")
-    .select("id, status")
+    .select("id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
     .in("status", ["matched", "in_progress"])
     .limit(1);
+
+  if (error) {
+    console.log(error);
+    return false;
+  }
 
   return data && data.length > 0;
 }
@@ -56,8 +61,7 @@ app.post("/payment-success", async (req, res) => {
     await bot.sendMessage(order.user_id,
 `✅ Payment confirmed!
 
-🤝 You are now chatting with ${runnerTag}`,
-    {
+🤝 You are now chatting with ${runnerTag}`, {
       reply_markup: {
         inline_keyboard: [
           [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
@@ -65,18 +69,19 @@ app.post("/payment-success", async (req, res) => {
       }
     });
 
-    await bot.sendMessage(order.runner_id,
+    if (order.runner_id) {
+      await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
-🤝 You are now chatting with ${userTag}`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "❌ Cancel", callback_data: `cancel_${order.id}` }],
-          [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
-        ]
-      }
-    });
+🤝 You are now chatting with ${userTag}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel", callback_data: `cancel_${order.id}` }],
+            [{ text: "❌ End Chat", callback_data: `end_${order.id}` }]
+          ]
+        }
+      });
+    }
 
     res.send("OK");
 
@@ -90,6 +95,7 @@ app.post("/payment-success", async (req, res) => {
 app.get("/create-payment", async (req, res) => {
   const { orderId } = req.query;
 
+  // ⚠️ Still mocked — replace with real payment later
   await fetch(`${BASE_URL}/payment-success`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -120,26 +126,24 @@ bot.onText(/\/start/, async (msg) => {
     return bot.sendMessage(userId,
 `👋 Welcome to Helply!
 
-Please accept Terms`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Accept", callback_data: "accept_terms" }]
-          ]
-        }
-      });
+Please accept Terms`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Accept", callback_data: "accept_terms" }]
+        ]
+      }
+    });
   }
 
   if (!user.accepted_terms) {
     return bot.sendMessage(userId,
-`Please accept Terms`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Accept", callback_data: "accept_terms" }]
-          ]
-        }
-      });
+`Please accept Terms`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "✅ Accept", callback_data: "accept_terms" }]
+        ]
+      }
+    });
   }
 
   bot.sendMessage(userId, "🚀 Send your request");
@@ -147,7 +151,7 @@ Please accept Terms`,
 
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
-  if (!msg.text || msg.text.startsWith("/")) return;
+  if (!msg.text || /^\/\w+/.test(msg.text)) return;
 
   const userId = msg.from.id.toString();
   const text = msg.text.trim();
@@ -162,7 +166,7 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "⚠️ Use /start first");
   }
 
-  // CHAT
+  // ACTIVE CHAT
   const { data: activeOrder } = await supabase
     .from("orders")
     .select("*")
@@ -184,14 +188,13 @@ bot.on("message", async (msg) => {
   if (await isBusy(userId)) {
     return bot.sendMessage(userId, "❌ Finish current task first");
   }
-  
-// 🔥 CLEAN ANY STALE TASKS
-await supabase.from("orders")
-  .update({ status: "completed" })
-  .eq("user_id", userId)
-  .in("status", ["matched", "in_progress"]);
-  
-  // CREATE ORDER
+
+  // CLEAN OLD MATCHED ONLY
+  await supabase.from("orders")
+    .update({ status: "completed" })
+    .eq("user_id", userId)
+    .eq("status", "matched");
+
   const taskId = Date.now();
 
   await supabase.from("orders").insert([{
@@ -211,8 +214,7 @@ await supabase.from("orders")
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
-📌 ${text}`,
-      {
+📌 ${text}`, {
         reply_markup: {
           inline_keyboard: [
             [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
@@ -237,36 +239,39 @@ bot.on("callback_query", async (q) => {
         .update({ accepted_terms: true })
         .eq("id", userId);
 
-      return bot.sendMessage(userId, "🎉 You're in!");
+      await bot.sendMessage(userId, "🎉 You're in!");
+      return bot.answerCallbackQuery(q.id);
     }
 
     // ===== END =====
     if (data.startsWith("end_")) {
-  const orderId = data.split("_")[1];
+      const orderId = data.split("_")[1];
 
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(orderId))
-    .maybeSingle();
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", Number(orderId))
+        .maybeSingle();
 
-  if (!order) return;
+      if (!order) return;
 
-  // ✅ force full cleanup
-  await supabase.from("orders").update({
-    status: "completed",
-    payment_status: "completed",
-    runner_id: null
-  }).eq("id", Number(orderId));
+      await supabase.from("orders").update({
+        status: "completed",
+        payment_status: "completed",
+        runner_id: null
+      }).eq("id", Number(orderId));
 
-  await bot.sendMessage(order.user_id,
-"✅ Task completed. You can send a new request.");
+      await bot.sendMessage(order.user_id,
+        "✅ Task completed. You can send a new request.");
 
-  await bot.sendMessage(order.runner_id,
-"✅ Task completed. You can accept new tasks.");
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id,
+          "✅ Task completed. You can accept new tasks.");
+      }
 
-  return bot.answerCallbackQuery(q.id);
-}
+      return bot.answerCallbackQuery(q.id);
+    }
+
     // ===== OFFER =====
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
@@ -278,19 +283,20 @@ bot.on("callback_query", async (q) => {
         });
       }
 
-      return bot.sendMessage(userId,
+      await bot.sendMessage(userId,
 `💰 Set your offer
 
-₦${price}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "+100", callback_data: `adj_${taskId}_${price}_100` }],
-              [{ text: "-100", callback_data: `adj_${taskId}_${price}_-100` }],
-              [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
-            ]
-          }
-        });
+₦${price}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "+100", callback_data: `adj_${taskId}_${price}_100` }],
+            [{ text: "-100", callback_data: `adj_${taskId}_${price}_-100` }],
+            [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
+          ]
+        }
+      });
+
+      return bot.answerCallbackQuery(q.id);
     }
 
     // ===== ADJUST =====
@@ -300,7 +306,7 @@ bot.on("callback_query", async (q) => {
       let newPrice = Number(current) + Number(change);
       if (newPrice < 100) newPrice = 100;
 
-      return bot.editMessageText(`₦${newPrice}`, {
+      await bot.editMessageText(`₦${newPrice}`, {
         chat_id: q.message.chat.id,
         message_id: q.message.message_id,
         reply_markup: {
@@ -311,31 +317,21 @@ bot.on("callback_query", async (q) => {
           ]
         }
       });
+
+      return bot.answerCallbackQuery(q.id);
     }
 
     // ===== SUBMIT =====
     if (data.startsWith("submit_")) {
       const [_, taskId, price] = data.split("_");
 
-      const { data: existing } = await supabase
-        .from("offers")
-        .select("id")
-        .eq("order_id", String(taskId))
-        .eq("runner_id", userId)
-        .maybeSingle();
-
-      if (existing) {
-        return bot.answerCallbackQuery(q.id, {
-          text: "❌ Already offered",
-          show_alert: true
-        });
-      }
-
       const { data: order } = await supabase
         .from("orders")
         .select("*")
         .eq("id", Number(taskId))
         .maybeSingle();
+
+      if (!order) return;
 
       await supabase.from("offers").insert([{
         id: uuidv4(),
@@ -356,9 +352,11 @@ bot.on("callback_query", async (q) => {
         { text: `${o.runner_name} — ₦${o.current_price}`, callback_data: `view_${o.id}` }
       ]);
 
-      return bot.sendMessage(order.user_id, "💰 Offers:", {
+      await bot.sendMessage(order.user_id, "💰 Offers:", {
         reply_markup: { inline_keyboard: buttons }
       });
+
+      return bot.answerCallbackQuery(q.id);
     }
 
     // ===== VIEW =====
@@ -371,15 +369,23 @@ bot.on("callback_query", async (q) => {
         .eq("id", id)
         .maybeSingle();
 
-      return bot.sendMessage(userId,
-`${o.runner_name} — ₦${o.current_price}`,
-        {
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: "✅ Accept", callback_data: `accept_${id}` }]
-            ]
-          }
+      if (!o) {
+        return bot.answerCallbackQuery(q.id, {
+          text: "❌ Offer not found",
+          show_alert: true
         });
+      }
+
+      await bot.sendMessage(userId,
+`${o.runner_name} — ₦${o.current_price}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept", callback_data: `accept_${id}` }]
+          ]
+        }
+      });
+
+      return bot.answerCallbackQuery(q.id);
     }
 
     // ===== ACCEPT =====
@@ -392,58 +398,64 @@ bot.on("callback_query", async (q) => {
         .eq("id", id)
         .maybeSingle();
 
-      await supabase.from("offers").delete().eq("order_id", String(orderId))
+      if (!o) return;
+
+      await supabase.from("offers")
+        .delete()
+        .eq("order_id", String(o.order_id));
 
       await supabase.from("orders").update({
         runner_id: o.runner_id,
         runner_username: o.runner_username,
         status: "matched"
-      }).eq("id", o.order_id);
+      }).eq("id", Number(o.order_id));
 
       const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
       await bot.sendMessage(o.user_id, `💳 Pay:\n${link}`);
+
+      return bot.answerCallbackQuery(q.id);
     }
 
-    /// ===== CANCEL =====
-if (data.startsWith("cancel_")) {
-  const orderId = data.split("_")[1];
+    // ===== CANCEL =====
+    if (data.startsWith("cancel_")) {
+      const orderId = data.split("_")[1];
 
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(orderId))
-    .maybeSingle();
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", Number(orderId))
+        .maybeSingle();
 
-  if (!order) return;
+      if (!order) return;
 
-  await supabase.from("orders").update({
-    runner_id: null,
-    runner_username: null,
-    status: "open",
-    payment_status: "pending"
-  }).eq("id", Number(orderId));
+      await supabase.from("orders").update({
+        runner_id: null,
+        runner_username: null,
+        status: "open",
+        payment_status: "pending"
+      }).eq("id", Number(orderId));
 
-  await supabase.from("offers")
-    .delete()
-    .eq("order_id", orderId);
+      await supabase.from("offers")
+        .delete()
+        .eq("order_id", orderId);
 
-  await bot.sendMessage(order.user_id,
-    "⚠️ Runner cancelled. New runners can offer.");
+      await bot.sendMessage(order.user_id,
+        "⚠️ Runner cancelled. New runners can offer.");
 
-  await bot.sendMessage(order.runner_id,
-    "❌ You cancelled the task. You can accept new tasks.");
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id,
+          "❌ You cancelled the task.");
+      }
 
-  return bot.answerCallbackQuery(q.id);
-}
+      return bot.answerCallbackQuery(q.id);
+    }
 
-// ✅ CLOSE TRY BLOCK HERE
-} catch (err) {
-  console.log("❌ ERROR:", err.message);
-}
-
-// ✅ CLOSE CALLBACK HERE
+  } catch (err) {
+    console.log("❌ ERROR:", err.message);
+  }
 });
+
 // ================= SERVER =================
 app.listen(3000, () => {
   console.log("🌐 Server running on port 3000");
