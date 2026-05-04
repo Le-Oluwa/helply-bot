@@ -24,22 +24,16 @@ console.log("🚀 Helply Running");
 async function isBusy(userId) {
   const { data, error } = await supabase
     .from("orders")
-    .select("id, status, runner_id")
+    .select("id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"]);
+    .neq("status", "completed"); // ✅ better logic
 
   if (error) {
-    console.log(error);
+    console.log("BUSY ERROR:", error.message);
     return false;
   }
 
-  // Ignore ghost tasks (no runner + matched)
-  const active = data.filter(order => {
-    if (order.status === "matched" && !order.runner_id) return false;
-    return true;
-  });
-
-  return active.length > 0;
+  return data.length > 0;
 }
 
 // ================= PAYMENT SUCCESS =================
@@ -192,48 +186,48 @@ bot.on("message", async (msg) => {
 `💬 ${msg.from.first_name}: ${text}`);
   }
 
-  // BUSY CHECK
-  if (await isBusy(userId)) {
-    return bot.sendMessage(userId, "❌ Finish current task first");
-  }
+  // ✅ CLEANUP FIRST (CRITICAL FIX)
+await supabase.from("orders")
+  .update({ status: "completed" })
+  .or(`user_id.eq.${userId},runner_id.eq.${userId}`) // 🔥 include runner too
+  .in("status", ["matched", "in_progress"]);
 
-  // ✅ FIXED CLEANUP (CRITICAL FIX)
-  await supabase.from("orders")
-    .update({ status: "completed" })
-    .eq("user_id", userId)
-    .in("status", ["matched", "in_progress"]);
+// ✅ THEN BUSY CHECK
+if (await isBusy(userId)) {
+  return bot.sendMessage(userId, "❌ Finish current task first");
+}
 
-  const taskId = Date.now();
+// CREATE ORDER
+const taskId = Date.now();
 
-  await supabase.from("orders").insert([{
-    id: taskId,
-    user_id: userId,
-    user_username: msg.from.username || "",
-    delivery_location: text,
-    status: "open",
-    payment_status: "pending"
-  }]);
+await supabase.from("orders").insert([{
+  id: taskId,
+  user_id: userId,
+  user_username: msg.from.username || "",
+  delivery_location: text,
+  status: "open",
+  payment_status: "pending"
+}]);
 
-  await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
+await bot.sendMessage(userId, `✅ Request sent\n🆔 ${taskId}`);
 
-  try {
-    await bot.sendMessage(
-      RUNNER_GROUP_ID,
+try {
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
 📌 ${text}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
-          ]
-        }
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
+        ]
       }
-    );
-  } catch (err) {
-    console.log("GROUP ERROR:", err.message);
-  }
-});
+    }
+  );
+} catch (err) {
+  console.log("GROUP ERROR:", err.message);
+}
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
