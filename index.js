@@ -92,17 +92,64 @@ app.post("/payment-success", async (req, res) => {
 
 // ================= CREATE PAYMENT =================
 app.get("/create-payment", async (req, res) => {
-  const { orderId } = req.query;
+  try {
+   const orderId = req.body.orderId || req.query.orderId;
 
-  await fetch(`${BASE_URL}/payment-success`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orderId })
-  });
+    // ✅ Validate orderId
+    if (!orderId) {
+      return res.send("❌ Missing order ID");
+    }
 
-  res.send("<h2>✅ Payment Successful</h2>");
+    const { data: order, error } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", Number(orderId))
+      .maybeSingle();
+
+    if (error) {
+      console.log("FETCH ERROR:", error.message);
+      return res.send("❌ Error fetching order");
+    }
+
+    // ✅ Validate order
+    if (!order || !order.total_price) {
+      return res.send("❌ Invalid order amount. Recreate order.");
+    }
+
+    // ✅ Prevent double payment
+    if (order.payment_status === "paid") {
+      return res.send("✅ This order is already paid.");
+    }
+
+    if (order.status === "in_progress") {
+      return res.send("⚠️ Order already in progress.");
+    }
+
+    const amount = order.total_price * 100; // (for real payment later)
+
+    // ✅ Clean payment UI
+    return res.send(`
+      <div style="font-family:sans-serif;text-align:center;margin-top:50px">
+        <h2>💳 Payment</h2>
+        <p><strong>Task Price:</strong> ₦${order.agreed_price || 0}</p>
+        <p><strong>Service Fee:</strong> ₦${(order.total_price - order.agreed_price) || 0}</p>
+        <h3>Total: ₦${order.total_price}</h3>
+
+        <br/>
+
+        <a href="${BASE_URL}/payment-success?orderId=${order.id}">
+          <button style="padding:10px 20px;font-size:16px;">
+            Pay Now
+          </button>
+        </a>
+      </div>
+    `);
+
+  } catch (err) {
+    console.log("PAYMENT PAGE ERROR:", err.message);
+    return res.send("❌ Something went wrong");
+  }
 });
-
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const userId = msg.from.id.toString();
@@ -394,30 +441,64 @@ bot.on("callback_query", async (q) => {
     // ===== ACCEPT =====
     if (data.startsWith("accept_")) {
       const id = data.split("_")[1];
+const { data: o, error } = await supabase
+  .from("offers")
+  .select("*")
+  .eq("id", id)
+  .maybeSingle();
 
-      const { data: o } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+if (error || !o) {
+  console.log("OFFER FETCH ERROR:", error?.message);
+  return bot.answerCallbackQuery(q.id, {
+    text: "❌ Offer not found",
+    show_alert: true
+  });
+}
 
-      if (!o) return;
+// ✅ Validate price
+const runnerFee = Number(o.current_price);
+if (!runnerFee || runnerFee <= 0) {
+  return bot.answerCallbackQuery(q.id, {
+    text: "❌ Invalid price",
+    show_alert: true
+  });
+}
 
-      await supabase.from("offers")
-        .delete()
-        .eq("order_id", String(o.order_id));
+// 🔥 PRICING LOGIC
+const runnerPayout = Math.round(runnerFee * 0.9); // runner gets 90%
+const userPrice = Math.round(runnerFee * 1.3);   // user pays +30%
 
-      await supabase.from("orders").update({
-        runner_id: o.runner_id,
-        runner_username: o.runner_username,
-        status: "matched"
-      }).eq("id", Number(o.order_id));
+// ✅ Delete other offers
+await supabase.from("offers")
+  .delete()
+  .eq("order_id", String(o.order_id));
 
-      const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
+// ✅ Update order with FULL pricing
+await supabase.from("orders").update({
+  runner_id: o.runner_id,
+  runner_username: o.runner_username,
+  agreed_price: runnerFee,
+  runner_payout: runnerPayout,
+  total_price: userPrice,
+  status: "matched"
+}).eq("id", Number(o.order_id));
 
-      await bot.sendMessage(o.user_id, `💳 Pay:\n${link}`);
+// ✅ Payment link
+const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
-      return bot.answerCallbackQuery(q.id);
+// ✅ Better message (VERY IMPORTANT)
+await bot.sendMessage(o.user_id,
+`💳 Payment Required
+
+💰 Task Price: ₦${runnerFee}
+📈 Service Fee: ₦${userPrice - runnerFee}
+🧾 Total: ₦${userPrice}
+
+👉 Pay here:
+${link}`
+);
+
+return bot.answerCallbackQuery(q.id);
     }
 
     // ===== CANCEL =====
