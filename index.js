@@ -24,17 +24,22 @@ console.log("🚀 Helply Running");
 async function isBusy(userId) {
   const { data, error } = await supabase
     .from("orders")
-    .select("id")
+    .select("id, status, runner_id")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"])
-    .limit(1);
+    .in("status", ["matched", "in_progress"]);
 
   if (error) {
-    console.log("BUSY ERROR:", error.message);
+    console.log(error);
     return false;
   }
 
-  return data && data.length > 0;
+  // Ignore ghost tasks (no runner + matched)
+  const active = data.filter(order => {
+    if (order.status === "matched" && !order.runner_id) return false;
+    return true;
+  });
+
+  return active.length > 0;
 }
 
 // ================= PAYMENT SUCCESS =================
