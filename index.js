@@ -1,9 +1,9 @@
+// ================= REQUIRE =================
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const { createClient } = require("@supabase/supabase-js");
 const { v4: uuidv4 } = require("uuid");
 const express = require("express");
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 app.use(express.json());
@@ -18,17 +18,14 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 const BASE_URL = process.env.BASE_URL;
 
-console.log("🚀 Helply Running");
-
 // ================= HELPER =================
 async function isBusy(userId) {
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("orders")
-    .select("id")
+    .select("id, status")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
     .in("status", ["matched", "in_progress"]);
 
-  if (error) return false;
   return data && data.length > 0;
 }
 
@@ -49,11 +46,13 @@ bot.onText(/\/start/, async (msg) => {
       username,
       accepted_terms: false
     }]);
+  }
 
+  if (!user || !user.accepted_terms) {
     return bot.sendMessage(userId,
 `👋 Welcome to Helply
 
-Please accept terms to continue`, {
+Please accept terms`, {
       reply_markup: {
         inline_keyboard: [[
           { text: "✅ Accept Terms", callback_data: "accept_terms" }
@@ -62,29 +61,15 @@ Please accept terms to continue`, {
     });
   }
 
-  if (!user.accepted_terms) {
-    return bot.sendMessage(userId,
-`⚠️ Please accept terms`, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "✅ Accept Terms", callback_data: "accept_terms" }
-        ]]
-      }
-    });
-  }
-
-  return bot.sendMessage(userId,
-`🚀 You're ready
-
-Send your request`);
+  return bot.sendMessage(userId, `🚀 Send your request`);
 });
 
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
-  if (!msg.text || /^\/\w+/.test(msg.text)) return;
+  if (!msg.text || msg.text.startsWith("/")) return;
 
   const userId = msg.from.id.toString();
-  const text = msg.text.trim();
+  const text = msg.text;
 
   const { data: user } = await supabase
     .from("users")
@@ -93,9 +78,9 @@ bot.on("message", async (msg) => {
     .maybeSingle();
 
   if (!user) return bot.sendMessage(userId, "Use /start");
-  if (!user.accepted_terms) return bot.sendMessage(userId, "Accept terms");
+  if (!user.accepted_terms) return bot.sendMessage(userId, "Accept terms first");
 
-  // CHAT MODE
+  // ACTIVE CHAT
   const { data: active } = await supabase
     .from("orders")
     .select("*")
@@ -106,7 +91,6 @@ bot.on("message", async (msg) => {
   if (active) {
     const receiver =
       userId === active.user_id ? active.runner_id : active.user_id;
-
     return bot.sendMessage(receiver, `💬 ${msg.from.first_name}: ${text}`);
   }
 
@@ -134,17 +118,19 @@ bot.on("message", async (msg) => {
   await bot.sendMessage(userId, `✅ Request sent`);
 
   try {
-    await bot.sendMessage(RUNNER_GROUP_ID,
+    await bot.sendMessage(
+      RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
 📌 ${text}`, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "💰 Offer", callback_data: `offer_${taskId}_500` }
-        ]]
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
+          ]
+        }
       }
-    });
+    );
   } catch (err) {
     console.log("GROUP ERROR:", err.message);
   }
@@ -157,21 +143,21 @@ bot.on("callback_query", async (q) => {
 
   try {
 
+    // ACCEPT TERMS
     if (data === "accept_terms") {
       await supabase.from("users")
         .update({ accepted_terms: true })
         .eq("id", userId);
 
-      await bot.sendMessage(userId,
-`🎉 You're in!
-
-🚀 Send your request`);
+      await bot.sendMessage(userId, "🎉 You're in! Send your request");
       return bot.answerCallbackQuery(q.id);
     }
 
+    // OFFER
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
 
+      // CLEAN runner
       await supabase.from("orders")
         .update({ status: "completed" })
         .eq("runner_id", userId)
@@ -198,6 +184,7 @@ bot.on("callback_query", async (q) => {
       return bot.answerCallbackQuery(q.id);
     }
 
+    // SUBMIT OFFER
     if (data.startsWith("submit_")) {
       const [_, taskId, price] = data.split("_");
 
@@ -217,11 +204,45 @@ bot.on("callback_query", async (q) => {
         current_price: Number(price)
       }]);
 
-      await bot.sendMessage(order.user_id, "💰 New offer received");
+      const { data: offers } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("order_id", String(taskId));
+
+      const buttons = offers.map(o => [
+        { text: `${o.runner_name} - ₦${o.current_price}`, callback_data: `view_${o.id}` }
+      ]);
+
+      await bot.sendMessage(order.user_id, "💰 Offers:", {
+        reply_markup: { inline_keyboard: buttons }
+      });
 
       return bot.answerCallbackQuery(q.id);
     }
 
+    // VIEW OFFER
+    if (data.startsWith("view_")) {
+      const id = data.split("_")[1];
+
+      const { data: o } = await supabase
+        .from("offers")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      await bot.sendMessage(userId,
+`${o.runner_name} - ₦${o.current_price}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "✅ Accept", callback_data: `accept_${id}` }]
+          ]
+        }
+      });
+
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // ACCEPT OFFER
     if (data.startsWith("accept_")) {
       const id = data.split("_")[1];
 
@@ -250,6 +271,17 @@ bot.on("callback_query", async (q) => {
 
       const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
+      await bot.sendMessage(o.runner_id,
+`📦 Task assigned
+
+💰 You earn ₦${runnerPayout}`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]
+          ]
+        }
+      });
+
       await bot.sendMessage(o.user_id,
 `💳 Pay ₦${userPrice}
 
@@ -258,10 +290,32 @@ ${link}`);
       return bot.answerCallbackQuery(q.id);
     }
 
+    // CANCEL
+    if (data.startsWith("cancel_")) {
+      const id = data.split("_")[1];
+
+      await supabase.from("orders").update({
+        runner_id: null,
+        status: "open"
+      }).eq("id", Number(id));
+
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // END
+    if (data.startsWith("end_")) {
+      const id = data.split("_")[1];
+
+      await supabase.from("orders")
+        .update({ status: "completed" })
+        .eq("id", Number(id));
+
+      return bot.answerCallbackQuery(q.id);
+    }
+
   } catch (err) {
     console.log("ERROR:", err.message);
   }
-
 });
 
 // ================= SERVER =================
