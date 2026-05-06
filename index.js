@@ -532,6 +532,81 @@ ${link}`);
   }
 });
 
+// ================= PAYMENT SUCCESS =================
+app.all("/payment-success", async (req, res) => {
+
+  try {
+
+    const orderId = req.body.orderId || req.query.orderId;
+
+    if (!orderId) {
+      return res.send("❌ Missing order ID");
+    }
+
+    const { data: order } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("id", Number(orderId))
+      .maybeSingle();
+
+    if (!order) {
+      return res.send("❌ Order not found");
+    }
+
+    // ✅ ACTIVATE TASK
+    await supabase.from("orders")
+      .update({
+        payment_status: "paid",
+        status: "in_progress"
+      })
+      .eq("id", Number(orderId));
+
+    // ✅ RUNNER MESSAGE
+    if (order.runner_id) {
+
+      await bot.sendMessage(order.runner_id,
+`💰 Payment received!
+
+📦 Task is now active.
+You can now chat with the user.`, {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ End Task", callback_data: `end_${order.id}` }
+            ],
+            [
+              { text: "❌ Cancel Task", callback_data: `cancel_${order.id}` }
+            ]
+          ]
+        }
+      });
+    }
+
+    // ✅ USER MESSAGE
+    await bot.sendMessage(order.user_id,
+`✅ Payment confirmed!
+
+🤝 You can now chat with your Helper.`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "❌ End Chat", callback_data: `end_${order.id}` }
+          ]
+        ]
+      }
+    });
+
+    return res.send("✅ Payment successful");
+
+  } catch (err) {
+
+    console.log("PAYMENT SUCCESS ERROR:", err.message);
+
+    return res.send("❌ Payment error");
+  }
+
+});
+
 // ================= SERVER =================
 app.listen(3000, () => {
   console.log("🌐 Server running on port 3000");
