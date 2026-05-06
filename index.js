@@ -679,9 +679,16 @@ You can now chat with the user.`, {
       }
     });
 
-    return res.send("✅ Payment successful");
+       return res.send("✅ Payment successful");
 
+  } catch (err) {
 
+    console.log("PAYMENT SUCCESS ERROR:", err.message);
+
+    return res.send("❌ Payment error");
+  }
+
+});
 
 // ================= SERVER =================
 app.listen(3000, () => {
