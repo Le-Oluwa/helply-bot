@@ -359,11 +359,6 @@ if (data.startsWith("reject_")) {
     if (data.startsWith("offer_")) {
       const [_, taskId, price] = data.split("_");
 
-      // CLEAN runner
-      await supabase.from("orders")
-        .update({ status: "completed" })
-        .eq("runner_id", userId)
-        .in("status", ["matched", "in_progress"]);
 
       if (await isBusy(userId)) {
         return bot.answerCallbackQuery(q.id, {
