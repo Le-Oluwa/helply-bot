@@ -638,6 +638,30 @@ if (data.startsWith("end_")) {
     });
   }
 
+// END TASK
+if (data.startsWith("end_")) {
+
+  const id = data.split("_")[1];
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle();
+
+  if (!order) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Task not found"
+    });
+  }
+
+  // ONLY ACTIVE TASKS
+  if (order.status !== "in_progress") {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Task already ended"
+    });
+  }
+
   // END TASK
   await supabase.from("orders")
     .update({
@@ -648,19 +672,26 @@ if (data.startsWith("end_")) {
   // USER
   await bot.sendMessage(
     order.user_id,
-`✅ Task ended successfully`
+    "✅ Task ended successfully"
   );
 
   // RUNNER
   await bot.sendMessage(
     order.runner_id,
-`✅ Task completed successfully`
+    "✅ Task completed successfully"
   );
 
   return bot.answerCallbackQuery(q.id, {
     text: "✅ Task ended"
   });
 }
+
+  } catch (err) {
+    console.log("ERROR:", err.message);
+  }
+
+});
+
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
 
@@ -715,6 +746,7 @@ You can now chat with the user.`,
     ]
   }
 });
+
     }
 
     // USER
@@ -744,6 +776,7 @@ You can now chat with the user.`,
 
     return res.send("❌ Payment error");
   }
+
 });
 
 // ================= SERVER =================
