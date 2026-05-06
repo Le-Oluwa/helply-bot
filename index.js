@@ -485,16 +485,18 @@ if (data.startsWith("reject_")) {
 
       const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
-      await bot.sendMessage(o.runner_id,
+     await bot.sendMessage(o.runner_id,
 `📦 Task assigned
 
-💰 You earn ₦${runnerPayout}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]
-          ]
-        }
-      });
+⏳ Waiting for user payment...`, {
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }
+      ]
+    ]
+  }
+});
 
       await bot.sendMessage(o.user_id,
 `💳 Pay ₦${userPrice}
@@ -504,34 +506,113 @@ ${link}`);
       return bot.answerCallbackQuery(q.id);
     }
 
-    // CANCEL
-    if (data.startsWith("cancel_")) {
-      const id = data.split("_")[1];
+   
+    // CANCEL TASK
+if (data.startsWith("cancel_")) {
 
-      await supabase.from("orders").update({
-        runner_id: null,
-        status: "open"
-      }).eq("id", Number(id));
+  const id = data.split("_")[1];
 
-      return bot.answerCallbackQuery(q.id);
-    }
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle();
 
-    // END
-    if (data.startsWith("end_")) {
-      const id = data.split("_")[1];
-
-      await supabase.from("orders")
-        .update({ status: "completed" })
-        .eq("id", Number(id));
-
-      return bot.answerCallbackQuery(q.id);
-    }
-
-  } catch (err) {
-    console.log("ERROR:", err.message);
+  if (!order) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Order not found"
+    });
   }
-});
 
+  // ❌ prevent cancel after payment
+  if (order.payment_status === "paid") {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Cannot cancel after payment",
+      show_alert: true
+    });
+  }
+
+  // reset task
+  await supabase.from("orders")
+    .update({
+      runner_id: null,
+      runner_username: null,
+      agreed_price: null,
+      runner_payout: null,
+      total_price: null,
+      payment_status: "pending",
+      status: "open"
+    })
+    .eq("id", Number(id));
+
+  // delete old offers
+  await supabase
+    .from("offers")
+    .delete()
+    .eq("order_id", String(id));
+
+  // repost task
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
+`🚨 REPOSTED REQUEST
+
+🆔 ${order.id}
+📌 ${order.delivery_location}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "💰 Offer", callback_data: `offer_${order.id}_500` }
+          ]
+        ]
+      }
+    }
+  );
+
+  // notify user
+  await bot.sendMessage(order.user_id,
+`⚠️ Your Helper cancelled the task.
+
+Your request has been reposted.`);
+
+  // notify runner
+  await bot.sendMessage(userId,
+`❌ Task cancelled successfully`);
+
+  return bot.answerCallbackQuery(q.id);
+}
+   // END TASK
+if (data.startsWith("end_")) {
+
+  const id = data.split("_")[1];
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("id", Number(id))
+    .maybeSingle();
+
+  if (!order) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Task not found"
+    });
+  }
+
+  await supabase.from("orders")
+    .update({
+      status: "completed"
+    })
+    .eq("id", Number(id));
+
+  await bot.sendMessage(order.user_id,
+    "✅ Task completed successfully");
+
+  await bot.sendMessage(order.runner_id,
+    "✅ Task ended successfully");
+
+  return bot.answerCallbackQuery(q.id, {
+    text: "Task completed"
+  });
+}
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
 
@@ -561,26 +642,23 @@ app.all("/payment-success", async (req, res) => {
       })
       .eq("id", Number(orderId));
 
-    // ✅ RUNNER MESSAGE
-    if (order.runner_id) {
+   // RUNNER MESSAGE
+if (order.runner_id) {
 
-      await bot.sendMessage(order.runner_id,
+  await bot.sendMessage(order.runner_id,
 `💰 Payment received!
 
 📦 Task is now active.
 You can now chat with the user.`, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ End Task", callback_data: `end_${order.id}` }
-            ],
-            [
-              { text: "❌ Cancel Task", callback_data: `cancel_${order.id}` }
-            ]
-          ]
-        }
-      });
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ End Task", callback_data: `end_${order.id}` }
+        ]
+      ]
     }
+  });
+}
 
     // ✅ USER MESSAGE
     await bot.sendMessage(order.user_id,
