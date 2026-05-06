@@ -257,10 +257,6 @@ New price: ₦${newPrice}`, {
   }
 
   // CLEANUP
-  await supabase.from("orders")
-    .update({ status: "completed" })
-    .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"]);
 
   if (await isBusy(userId)) {
     return bot.sendMessage(userId, "❌ Finish current task first");
@@ -427,35 +423,44 @@ if (data.startsWith("reject_")) {
     }
 
     // VIEW OFFER
-    if (data.startsWith("view_")) {
-      const id = data.split("_")[1];
+    // VIEW OFFER
+if (data.startsWith("view_")) {
 
-      const { data: o } = await supabase
-        .from("offers")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
+  const id = data.split("_")[1];
 
-      await bot.sendMessage(userId,
-`${o.runner_name} - ₦${o.current_price}`, {
-       reply_markup: {
-  inline_keyboard: [
-    [
-      { text: "✅ Accept", callback_data: `accept_${id}` }
-    ],
-    [
-      { text: "💬 Counter", callback_data: `counter_${id}` }
-    ],
-    [
-      { text: "❌ Reject", callback_data: `reject_${id}` }
+  const { data: o } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!o) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Offer not found"
+    });
+  }
+
+  await bot.sendMessage(
+    userId,
+`${o.runner_name} - ₦${o.current_price}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: "✅ Accept", callback_data: `accept_${id}` }
+      ],
+      [
+        { text: "💬 Counter", callback_data: `counter_${id}` }
+      ],
+      [
+        { text: "❌ Reject", callback_data: `reject_${id}` }
+      ]
     ]
-  ]
+  }
+});
+
+  return bot.answerCallbackQuery(q.id);
 }
-      });
-
-      return bot.answerCallbackQuery(q.id);
-    }
-
     // ACCEPT OFFER
     if (data.startsWith("accept_")) {
       const id = data.split("_")[1];
@@ -625,7 +630,7 @@ app.all("/payment-success", async (req, res) => {
 
   try {
 
-    const orderId = req.body.orderId || req.query.orderId;
+   const orderId = req.query.orderId;
 
     if (!orderId) {
       return res.send("❌ Missing order ID");
