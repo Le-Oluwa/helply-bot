@@ -422,7 +422,7 @@ if (data.startsWith("reject_")) {
       return bot.answerCallbackQuery(q.id);
     }
 
-    // VIEW OFFER
+ 
     // VIEW OFFER
 if (data.startsWith("view_")) {
 
@@ -512,7 +512,7 @@ ${link}`);
     }
 
    
-    // CANCEL TASK
+// CANCEL TASK
 if (data.startsWith("cancel_")) {
 
   const id = data.split("_")[1];
@@ -529,7 +529,7 @@ if (data.startsWith("cancel_")) {
     });
   }
 
-  // ❌ prevent cancel after payment
+  // ONLY BEFORE PAYMENT
   if (order.payment_status === "paid") {
     return bot.answerCallbackQuery(q.id, {
       text: "❌ Cannot cancel after payment",
@@ -537,6 +537,61 @@ if (data.startsWith("cancel_")) {
     });
   }
 
+  // RESET ORDER
+  await supabase.from("orders")
+    .update({
+      runner_id: null,
+      runner_username: null,
+      agreed_price: null,
+      runner_payout: null,
+      total_price: null,
+      status: "open",
+      payment_status: "pending"
+    })
+    .eq("id", Number(id));
+
+  // DELETE OLD OFFERS
+  await supabase
+    .from("offers")
+    .delete()
+    .eq("order_id", String(id));
+
+  // REPOST TO GROUP
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
+`🚨 REPOSTED REQUEST
+
+🆔 ${order.id}
+📌 ${order.delivery_location}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+      [
+        {
+          text: "💰 Offer",
+          callback_data: `offer_${order.id}_500`
+        }
+      ]
+    ]
+  }
+});
+
+  // NOTIFY USER
+  await bot.sendMessage(
+    order.user_id,
+`⚠️ Your Helper cancelled the task.
+
+The request has been reposted.`
+  );
+
+  // NOTIFY RUNNER
+  await bot.sendMessage(
+    order.runner_id,
+`❌ Task cancelled`
+  );
+
+  return bot.answerCallbackQuery(q.id);
+}
   // reset task
   await supabase.from("orders")
     .update({
@@ -585,7 +640,7 @@ Your request has been reposted.`);
 
   return bot.answerCallbackQuery(q.id);
 }
-   // END TASK
+// END TASK
 if (data.startsWith("end_")) {
 
   const id = data.split("_")[1];
@@ -602,27 +657,34 @@ if (data.startsWith("end_")) {
     });
   }
 
+  // ONLY ACTIVE TASKS
+  if (order.status !== "in_progress") {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Task already ended"
+    });
+  }
+
+  // COMPLETE TASK
   await supabase.from("orders")
     .update({
       status: "completed"
     })
     .eq("id", Number(id));
 
+  // USER
   await bot.sendMessage(order.user_id,
-    "✅ Task completed successfully");
+`✅ Task ended.
 
+Thank you for using Helply.`);
+
+  // RUNNER
   await bot.sendMessage(order.runner_id,
-    "✅ Task ended successfully");
+`✅ Task completed successfully`);
 
   return bot.answerCallbackQuery(q.id, {
-    text: "Task completed"
+    text: "✅ Task ended"
   });
 }
-      } catch (err) {
-    console.log("ERROR:", err.message);
-  }
-
-});
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
 
