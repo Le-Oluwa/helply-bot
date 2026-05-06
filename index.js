@@ -613,6 +613,11 @@ if (data.startsWith("end_")) {
     text: "Task completed"
   });
 }
+      } catch (err) {
+    console.log("ERROR:", err.message);
+  }
+
+});
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
 
@@ -676,14 +681,7 @@ You can now chat with the user.`, {
 
     return res.send("✅ Payment successful");
 
-  } catch (err) {
 
-    console.log("PAYMENT SUCCESS ERROR:", err.message);
-
-    return res.send("❌ Payment error");
-  }
-
-});
 
 // ================= SERVER =================
 app.listen(3000, () => {
