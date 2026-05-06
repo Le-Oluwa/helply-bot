@@ -17,6 +17,8 @@ const supabase = createClient(
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 const BASE_URL = process.env.BASE_URL;
+const pendingCounters = {};
+const pendingRunnerCounters = {};
 
 // ================= HELPER =================
 async function isBusy(userId) {
@@ -160,6 +162,86 @@ bot.on("message", async (msg) => {
   if (!currentUser.accepted_terms) {
     return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
   }
+
+  // ================= USER COUNTER =================
+if (pendingCounters[userId]) {
+
+  const offerId = pendingCounters[userId];
+  const counterPrice = Number(text);
+
+  if (isNaN(counterPrice) || counterPrice < 100) {
+    return bot.sendMessage(userId, "❌ Invalid amount");
+  }
+
+  const { data: offer } = await supabase
+    .from("offers")
+    .update({
+      current_price: counterPrice
+    })
+    .eq("id", offerId)
+    .select()
+    .maybeSingle();
+
+  delete pendingCounters[userId];
+
+  await bot.sendMessage(offer.runner_id,
+`💬 User countered your offer
+
+New price: ₦${counterPrice}`, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ Accept", callback_data: `accept_${offerId}` }
+        ],
+        [
+          { text: "💬 Counter Again", callback_data: `counter_runner_${offerId}` }
+        ]
+      ]
+    }
+  });
+
+  return;
+}
+
+// ================= RUNNER COUNTER =================
+if (pendingRunnerCounters[userId]) {
+
+  const offerId = pendingRunnerCounters[userId];
+  const newPrice = Number(text);
+
+  if (isNaN(newPrice) || newPrice < 100) {
+    return bot.sendMessage(userId, "❌ Invalid amount");
+  }
+
+  const { data: offer } = await supabase
+    .from("offers")
+    .update({
+      current_price: newPrice
+    })
+    .eq("id", offerId)
+    .select()
+    .maybeSingle();
+
+  delete pendingRunnerCounters[userId];
+
+  await bot.sendMessage(offer.user_id,
+`💬 Runner updated the offer
+
+New price: ₦${newPrice}`, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ Accept", callback_data: `accept_${offerId}` }
+        ],
+        [
+          { text: "💬 Counter", callback_data: `counter_${offerId}` }
+        ]
+      ]
+    }
+  });
+
+  return;
+}
   // ACTIVE CHAT
   const { data: active } = await supabase
     .from("orders")
@@ -218,9 +300,55 @@ bot.on("message", async (msg) => {
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
+
   const data = q.data;
   const userId = q.from.id.toString();
 
+  // USER COUNTER
+  if (data.startsWith("counter_")) {
+
+    const offerId = data.split("_")[1];
+
+    pendingCounters[userId] = offerId;
+
+    await bot.sendMessage(userId,
+      "💬 Enter your counter offer amount:");
+
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // RUNNER COUNTER
+  if (data.startsWith("counter_runner_")) {
+
+    const offerId = data.split("_")[2];
+
+    pendingRunnerCounters[userId] = offerId;
+
+    await bot.sendMessage(userId,
+      "💬 Enter your new offer amount:");
+
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // ... your other handlers below
+  
+  // REJECT OFFER
+if (data.startsWith("reject_")) {
+
+  const offerId = data.split("_")[1];
+
+  await supabase
+    .from("offers")
+    .delete()
+    .eq("id", offerId);
+
+  await bot.sendMessage(userId,
+    "❌ Offer rejected");
+
+  return bot.answerCallbackQuery(q.id);
+}
+});
+  
   try {
 
     // ACCEPT TERMS
@@ -312,11 +440,19 @@ bot.on("callback_query", async (q) => {
 
       await bot.sendMessage(userId,
 `${o.runner_name} - ₦${o.current_price}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "✅ Accept", callback_data: `accept_${id}` }]
-          ]
-        }
+       reply_markup: {
+  inline_keyboard: [
+    [
+      { text: "✅ Accept", callback_data: `accept_${id}` }
+    ],
+    [
+      { text: "💬 Counter", callback_data: `counter_${id}` }
+    ],
+    [
+      { text: "❌ Reject", callback_data: `reject_${id}` }
+    ]
+  ]
+}
       });
 
       return bot.answerCallbackQuery(q.id);
