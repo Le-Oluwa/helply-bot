@@ -621,6 +621,8 @@ if (data.startsWith("end_")) {
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
 
+  console.log("🔥 PAYMENT SUCCESS HIT");
+
   try {
 
     const orderId = req.body.orderId || req.query.orderId;
@@ -634,6 +636,8 @@ app.all("/payment-success", async (req, res) => {
       .select("*")
       .eq("id", Number(orderId))
       .maybeSingle();
+    
+    console.log("ORDER:", order);
 
     if (!order) {
       return res.send("❌ Order not found");
