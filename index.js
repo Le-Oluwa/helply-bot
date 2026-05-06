@@ -346,9 +346,7 @@ if (data.startsWith("reject_")) {
     "❌ Offer rejected");
 
   return bot.answerCallbackQuery(q.id);
-}
-});
-  
+}  
   try {
 
     // ACCEPT TERMS
