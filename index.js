@@ -613,30 +613,6 @@ Your request has been reposted.`
 
   return bot.answerCallbackQuery(q.id);
 }
-// END TASK
-// END TASK
-if (data.startsWith("end_")) {
-
-  const id = data.split("_")[1];
-
-  const { data: order } = await supabase
-    .from("orders")
-    .select("*")
-    .eq("id", Number(id))
-    .maybeSingle();
-
-  if (!order) {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Task not found"
-    });
-  }
-
-  // ONLY ACTIVE TASKS
-  if (order.status !== "in_progress") {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Task already ended"
-    });
-  }
 
 // END TASK
 if (data.startsWith("end_")) {
