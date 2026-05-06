@@ -40,30 +40,79 @@ bot.onText(/\/start/, async (msg) => {
     .eq("id", userId)
     .maybeSingle();
 
+  // AUTO CREATE USER
   if (!user) {
     await supabase.from("users").insert([{
       id: userId,
       username,
-      accepted_terms: false
+      accepted_terms: false,
+      banned: false
     }]);
+
+    user = {
+      id: userId,
+      accepted_terms: false
+    };
   }
 
-  if (!user || !user.accepted_terms) {
+  // TERMS FLOW
+  if (!user.accepted_terms) {
     return bot.sendMessage(userId,
-`👋 Welcome to Helply
+`📜 *Helply Terms & Conditions*
 
-Please accept terms`, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "✅ Accept Terms", callback_data: "accept_terms" }
-        ]]
-      }
-    });
+*Account Use*
+• Provide accurate information
+• Keep your account secure
+• You are responsible for activities on your account
+
+*Requesting Services*
+• Helply connects users with independent Helpers
+• Availability may vary
+• Prices may change due to demand or waiting time
+
+*Payments*
+• Payments are processed through supported methods
+• Refunds are reviewed case-by-case
+
+*User Conduct*
+• Treat Helpers respectfully
+• No threats, harassment, or unsafe behavior
+• Provide accurate locations
+
+*Cancellation Policy*
+• Cancellation fees may apply after a Helper starts moving
+
+*Account Suspension*
+Accounts may be suspended for:
+• Fraud
+• Abuse
+• Fake identity information
+• Safety violations
+
+*Liability*
+• Helply connects users with independent Helpers
+• Helply is not directly responsible for Helper conduct
+
+By continuing, you agree to these Terms & Conditions.`,
+{
+  parse_mode: "Markdown",
+  reply_markup: {
+    inline_keyboard: [
+      [
+        { text: "✅ Accept", callback_data: "accept_terms" },
+        { text: "❌ Decline", callback_data: "decline_terms" }
+      ]
+    ]
+  }
+});
   }
 
-  return bot.sendMessage(userId, `🚀 Send your request`);
-});
+  // ALREADY ACCEPTED
+  return bot.sendMessage(userId,
+`🚀 Welcome back to Helply
 
+Send your request`);
+});
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
