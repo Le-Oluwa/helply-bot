@@ -650,6 +650,11 @@ if (data.startsWith("end_")) {
     text: "Task completed"
   });
 }
+      } catch (err) {
+    console.log("ERROR:", err.message);
+  }
+
+});
 
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
