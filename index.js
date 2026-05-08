@@ -657,44 +657,69 @@ if (data.startsWith("end_")) {
 });
 
 // ================= PAYMENT SUCCESS =================
-app.all("/payment-success", async (req, res) => {
+app.get("/payment-success", async (req, res) => {
 
-  console.log("🔥 PAYMENT SUCCESS HIT");
+  return res.send(`
+    <h1>✅ Payment Successful</h1>
+    <p>You can return to Telegram.</p>
+  `);
+
+});
+// ================= FLUTTERWAVE WEBHOOK =================
+app.post("/flutterwave-webhook", async (req, res) => {
 
   try {
 
-    const orderId = req.query.orderId;
+    // 👇 HERE
+    const payload = req.body;
 
-    if (!orderId) {
-      return res.send("❌ Missing order ID");
+    // 🔐 VERIFY HASH
+    const signature = req.headers["verif-hash"];
+
+    if (signature !== process.env.FLW_WEBHOOK_SECRET) {
+      return res.sendStatus(401);
     }
 
-    const { data: order } = await supabase
-      .from("orders")
-      .select("*")
-      .eq("id", Number(orderId))
-      .maybeSingle();
+    console.log("🔥 WEBHOOK HIT");
 
-    console.log("ORDER:", order);
+    // verify payment
+    if (
+      payload.event === "charge.completed" &&
+      payload.data.status === "successful"
+    ) {
 
-    if (!order) {
-      return res.send("❌ Order not found");
-    }
+      const tx_ref = payload.data.tx_ref;
 
-    // ACTIVATE TASK
-    await supabase.from("orders")
-      .update({
-        payment_status: "paid",
-        status: "in_progress"
-      })
-      .eq("id", Number(orderId));
+      const orderId = tx_ref.split("_")[1];
 
-    // RUNNER
-    if (order.runner_id) {
+      // get order
+      const { data: order } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("id", orderId)
+        .single();
 
-// ✅ SEND END TASK BUTTON TO RUNNER
-await bot.sendMessage(
-  order.runner_id,
+      if (!order) {
+        return res.sendStatus(200);
+      }
+
+      // prevent duplicates
+      if (order.payment_status === "paid") {
+        return res.sendStatus(200);
+      }
+
+      // update order
+      await supabase
+        .from("orders")
+        .update({
+          payment_status: "paid",
+          status: "in_progress"
+        })
+        .eq("id", orderId);
+
+      // runner message
+      await bot.sendMessage(
+        order.runner_id,
 `💰 Payment received!
 
 📦 Task is now active.`,
@@ -704,42 +729,32 @@ await bot.sendMessage(
       [
         {
           text: "✅ End Task",
-          callback_data: `end_${order.id}`
+          callback_data: `end_${orderId}`
         }
       ]
     ]
   }
 });
-    }
 
-    // USER
-    await bot.sendMessage(
-      order.user_id,
+      // user message
+      await bot.sendMessage(
+        order.user_id,
 `✅ Payment confirmed!
 
-🤝 You can now chat with your Helper.`,
-{
-  reply_markup: {
-    inline_keyboard: [
-      [
-        {
-          text: "✅ End Task",
-          callback_data: `end_${order.id}`
-        }
-      ]
-    ]
-  }
-});
+🤝 You can now chat with your Helper.`
+      );
 
-    return res.send("✅ Payment successful");
+      console.log("✅ WEBHOOK ORDER UPDATED:", orderId);
+    }
+
+    return res.sendStatus(200);
 
   } catch (err) {
 
-    console.log("PAYMENT SUCCESS ERROR:", err.message);
+    console.log("❌ WEBHOOK ERROR:", err.message);
 
-    return res.send("❌ Payment error");
+    return res.sendStatus(500);
   }
-
 });
 
 // ================= SERVER =================
