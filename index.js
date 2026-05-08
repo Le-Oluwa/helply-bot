@@ -273,7 +273,14 @@ New price: ₦${newPrice}`, {
     payment_status: "pending"
   }]);
 
-  await bot.sendMessage(userId, `✅ Request sent`);
+ await bot.sendMessage(
+  userId,
+`✅ Request sent successfully!
+
+🆔 Request ID: ${taskId}
+
+📌 ${text}`
+);
 
   try {
     await bot.sendMessage(
