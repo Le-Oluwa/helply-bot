@@ -59,7 +59,7 @@ app.get("/create-payment", async (req, res) => {
         return res.send("Invalid order amount. Recreate order.");
       }
 
-      amount = Math.ceil(agreed * 1.05); // 🔥 5% fee
+      amount = Math.ceil(agreed * 1.3); // 🔥 5% fee
 
       // optional: update DB so it doesn't break again
       await supabase
@@ -199,23 +199,13 @@ await bot.sendMessage(
 });
 
 // 🔓 NOTIFY USER
+// 🔓 NOTIFY USER
 await bot.sendMessage(
   order.user_id,
 `✅ Payment confirmed!
 
-🤝 You can now chat with your Helper.`,
-{
-  reply_markup: {
-    inline_keyboard: [
-      [
-        {
-          text: "✅ End Task",
-          callback_data: `end_${orderId}`
-        }
-      ]
-    ]
-  }
-});
+🤝 You can now chat with your Helper.`
+);
 
 return res.send(`
   <h1>✅ Payment Successful</h1>
