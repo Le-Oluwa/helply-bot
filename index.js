@@ -626,42 +626,30 @@ if (data.startsWith("end_")) {
     });
   }
 
-  // ONLY ACTIVE TASKS
-  if (order.status !== "in_progress") {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Task already ended"
-    });
-  }
-
-  // END TASK
-  await supabase.from("orders")
+  // ✅ COMPLETE TASK
+  await supabase
+    .from("orders")
     .update({
       status: "completed"
     })
     .eq("id", Number(id));
 
-  // USER
+  // notify runner
   await bot.sendMessage(
-    order.user_id,
+    order.runner_id,
     "✅ Task ended successfully"
   );
 
-  // RUNNER
+  // notify user
   await bot.sendMessage(
-    order.runner_id,
+    order.user_id,
     "✅ Task completed successfully"
   );
 
   return bot.answerCallbackQuery(q.id, {
-    text: "✅ Task ended"
+    text: "Task completed"
   });
 }
-
-  } catch (err) {
-    console.log("ERROR:", err.message);
-  }
-
-});
 
 // ================= PAYMENT SUCCESS =================
 app.all("/payment-success", async (req, res) => {
@@ -699,12 +687,12 @@ app.all("/payment-success", async (req, res) => {
     // RUNNER
     if (order.runner_id) {
 
-      await bot.sendMessage(
-        order.runner_id,
+// ✅ SEND END TASK BUTTON TO RUNNER
+await bot.sendMessage(
+  order.runner_id,
 `💰 Payment received!
 
-📦 Task is now active.
-You can now chat with the user.`,
+📦 Task is now active.`,
 {
   reply_markup: {
     inline_keyboard: [
@@ -717,7 +705,6 @@ You can now chat with the user.`,
     ]
   }
 });
-
     }
 
     // USER
