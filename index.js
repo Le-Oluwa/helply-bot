@@ -356,30 +356,133 @@ if (data.startsWith("reject_")) {
     }
 
     // OFFER
-    if (data.startsWith("offer_")) {
-      const [_, taskId, price] = data.split("_");
+   // OFFER
+if (data.startsWith("offer_")) {
 
+  const [_, taskId, price] = data.split("_");
 
-      if (await isBusy(userId)) {
-        return bot.answerCallbackQuery(q.id, {
-          text: "❌ Finish current task first",
-          show_alert: true
-        });
-      }
+  if (await isBusy(userId)) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Finish current task first",
+      show_alert: true
+    });
+  }
 
-      await bot.sendMessage(userId,
-`💰 Set your offer ₦${price}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "+100", callback_data: `adj_${taskId}_${price}_100` }],
-            [{ text: "-100", callback_data: `adj_${taskId}_${price}_-100` }],
-            [{ text: "Submit", callback_data: `submit_${taskId}_${price}` }]
-          ]
+  await bot.sendMessage(
+    userId,
+`💰 Set your offer ₦${price}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+
+      [
+        {
+          text: "-1000",
+          callback_data: `adj_${taskId}_${price}_-1000`
+        },
+        {
+          text: "-500",
+          callback_data: `adj_${taskId}_${price}_-500`
+        },
+        {
+          text: "-50",
+          callback_data: `adj_${taskId}_${price}_-50`
         }
-      });
+      ],
 
-      return bot.answerCallbackQuery(q.id);
-    }
+      [
+        {
+          text: "+50",
+          callback_data: `adj_${taskId}_${price}_50`
+        },
+        {
+          text: "+500",
+          callback_data: `adj_${taskId}_${price}_500`
+        },
+        {
+          text: "+1000",
+          callback_data: `adj_${taskId}_${price}_1000`
+        }
+      ],
+
+      [
+        {
+          text: "✅ Submit Offer",
+          callback_data: `submit_${taskId}_${price}`
+        }
+      ]
+    ]
+  }
+});
+
+  return bot.answerCallbackQuery(q.id);
+}
+    // ADJUST OFFER PRICE
+if (data.startsWith("adj_")) {
+
+  const parts = data.split("_");
+
+  const taskId = parts[1];
+  const currentPrice = Number(parts[2]);
+  const change = Number(parts[3]);
+
+  let newPrice = currentPrice + change;
+
+  // minimum safety
+  if (newPrice < 100) {
+    newPrice = 100;
+  }
+
+  await bot.editMessageText(
+`💰 Set your offer ₦${newPrice}`,
+{
+  chat_id: q.message.chat.id,
+  message_id: q.message.message_id,
+  reply_markup: {
+    inline_keyboard: [
+
+      [
+        {
+          text: "-1000",
+          callback_data: `adj_${taskId}_${newPrice}_-1000`
+        },
+        {
+          text: "-500",
+          callback_data: `adj_${taskId}_${newPrice}_-500`
+        },
+        {
+          text: "-50",
+          callback_data: `adj_${taskId}_${newPrice}_-50`
+        }
+      ],
+
+      [
+        {
+          text: "+50",
+          callback_data: `adj_${taskId}_${newPrice}_50`
+        },
+        {
+          text: "+500",
+          callback_data: `adj_${taskId}_${newPrice}_500`
+        },
+        {
+          text: "+1000",
+          callback_data: `adj_${taskId}_${newPrice}_1000`
+        }
+      ],
+
+      [
+        {
+          text: "✅ Submit Offer",
+          callback_data: `submit_${taskId}_${newPrice}`
+        }
+      ]
+    ]
+  }
+});
+
+  return bot.answerCallbackQuery(q.id);
+}
 
     // SUBMIT OFFER
     if (data.startsWith("submit_")) {
