@@ -177,32 +177,51 @@ app.get("/payment-success", async (req, res) => {
       })
       .eq("id", orderId);
 
-    console.log("✅ ORDER UPDATED:", orderId);
+console.log("✅ ORDER UPDATED:", orderId);
 
-    // 🔓 NOTIFY RUNNER
-    await bot.sendMessage(
-      order.runner_id,
-      `💰 Payment Confirmed!
+// 🔓 NOTIFY RUNNER
+await bot.sendMessage(
+  order.runner_id,
+`💰 Payment received!
 
-🆔 Order: ${orderId}
-🚀 Start the task.`
-    );
+📦 Task is now active.`,
+{
+  reply_markup: {
+    inline_keyboard: [
+      [
+        {
+          text: "✅ End Task",
+          callback_data: `end_${orderId}`
+        }
+      ]
+    ]
+  }
+});
 
-    // 🔓 NOTIFY USER
-    await bot.sendMessage(
-      order.user_id,
-      `✅ Payment Successful!
+// 🔓 NOTIFY USER
+await bot.sendMessage(
+  order.user_id,
+`✅ Payment confirmed!
 
-🆔 Order: ${orderId}
+🤝 You can now chat with your Helper.`,
+{
+  reply_markup: {
+    inline_keyboard: [
+      [
+        {
+          text: "✅ End Task",
+          callback_data: `end_${orderId}`
+        }
+      ]
+    ]
+  }
+});
 
-🤝 You can now chat with your runner.`
-    );
-
-    return res.send(`
-      <h1>✅ Payment Successful</h1>
-      <p>Order ID: ${orderId}</p>
-      <p>Amount: ₦${paymentData.data.amount}</p>
-    `);
+return res.send(`
+  <h1>✅ Payment Successful</h1>
+  <p>Order ID: ${orderId}</p>
+  <p>Amount: ₦${paymentData.data.amount}</p>
+`);
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err.response?.data || err.message);
