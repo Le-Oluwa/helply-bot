@@ -429,8 +429,8 @@ if (data.startsWith("adj_")) {
   let newPrice = currentPrice + change;
 
   // minimum safety
-  if (newPrice < 100) {
-    newPrice = 100;
+  if (newPrice < 50) {
+    newPrice = 50;
   }
 
   await bot.editMessageText(
