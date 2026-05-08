@@ -745,16 +745,28 @@ if (data.startsWith("end_")) {
     .eq("id", Number(id));
 
   // notify runner
-  await bot.sendMessage(
-    order.runner_id,
-    "✅ Task ended successfully"
-  );
+ await bot.sendMessage(
+  order.runner_id,
+`✅ Task ended successfully
+
+⚠️ For disputes or support:
+
+📧 helply.cu@gmail.com
+
+Request ID: ${order.id}`
+);
 
   // notify user
-  await bot.sendMessage(
-    order.user_id,
-    "✅ Task completed successfully"
-  );
+await bot.sendMessage(
+  order.user_id,
+`✅ Task completed successfully
+
+⚠️ Need help or want to report an issue?
+
+📧 helply.cu@gmail.com
+
+Include your Request ID: ${order.id}`
+);
 
   return bot.answerCallbackQuery(q.id, {
     text: "Task completed"
