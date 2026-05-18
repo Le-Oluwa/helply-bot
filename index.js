@@ -18,6 +18,7 @@ const supabase = createClient(
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 const BASE_URL = process.env.BASE_URL;
 const pendingCounters = {};
+const pendingOrders = {};
 const pendingRunnerCounters = {};
 
 // ================= HELPER =================
@@ -242,6 +243,69 @@ New price: ₦${newPrice}`, {
 
   return;
 }
+
+  // ================= LOCATION STEP =================
+if (pendingOrders[userId]) {
+
+  const requestText = pendingOrders[userId].request;
+  const locationText = text;
+
+  const taskId = Math.floor(100000 + Math.random() * 900000);
+
+  // create order
+  await supabase.from("orders").insert([{
+    id: taskId,
+    user_id: userId,
+    user_username: msg.from.username || "",
+    request_text: requestText,
+    delivery_location: locationText,
+    status: "open",
+    payment_status: "pending"
+  }]);
+
+  delete pendingOrders[userId];
+
+  // user confirmation
+  await bot.sendMessage(
+    userId,
+`✅ Request sent successfully!
+
+🆔 Request ID: ${taskId}
+
+📦 Request:
+${requestText}
+
+📍 Location:
+${locationText}`
+  );
+
+  // send to runner group
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
+`🚨 NEW REQUEST
+
+🆔 ${taskId}
+
+📦 Request:
+${requestText}
+
+📍 Location:
+${locationText}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+      [
+        {
+          text: "💰 Offer",
+          callback_data: `offer_${taskId}_500`
+        }
+      ]
+    ]
+  }
+});
+
+  return;
+}
   // ACTIVE CHAT
   const { data: active } = await supabase
     .from("orders")
@@ -262,44 +326,18 @@ New price: ₦${newPrice}`, {
     return bot.sendMessage(userId, "❌ Finish current task first");
   }
 
-  const taskId = Date.now();
+  // SAVE REQUEST TEMPORARILY
+pendingOrders[userId] = {
+  request: text
+};
 
-  await supabase.from("orders").insert([{
-    id: taskId,
-    user_id: userId,
-    user_username: msg.from.username || "",
-    delivery_location: text,
-    status: "open",
-    payment_status: "pending"
-  }]);
-
- await bot.sendMessage(
+await bot.sendMessage(
   userId,
-`✅ Request sent successfully!
-
-🆔 Request ID: ${taskId}
-
-📌 ${text}`
+"📍 Enter your delivery location:"
 );
 
-  try {
-    await bot.sendMessage(
-      RUNNER_GROUP_ID,
-`🚨 NEW REQUEST
-
-🆔 ${taskId}
-📌 ${text}`, {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "💰 Offer", callback_data: `offer_${taskId}_500` }]
-          ]
-        }
-      }
-    );
-  } catch (err) {
-    console.log("GROUP ERROR:", err.message);
-  }
-});
+return;
+  
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
