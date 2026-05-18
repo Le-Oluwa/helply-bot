@@ -20,6 +20,7 @@ const BASE_URL = process.env.BASE_URL;
 const pendingCounters = {};
 const pendingOrders = {};
 const pendingRunnerCounters = {};
+const activeNegotiations = {};
 
 // ================= HELPER =================
 async function isBusy(userId) {
@@ -183,7 +184,6 @@ if (pendingCounters[userId]) {
     .select()
     .maybeSingle();
 
-  delete pendingCounters[userId];
 
   await bot.sendMessage(
     offer.runner_id,
@@ -240,7 +240,6 @@ if (pendingRunnerCounters[userId]) {
     .select()
     .maybeSingle();
 
-  delete pendingRunnerCounters[userId];
 
   await bot.sendMessage(
     offer.user_id,
