@@ -164,13 +164,13 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
   }
 
-  // ================= USER COUNTER =================
+// ================= USER COUNTER =================
 if (pendingCounters[userId]) {
 
   const offerId = pendingCounters[userId];
   const counterPrice = Number(text);
 
-  if (isNaN(counterPrice) || counterPrice < 100) {
+  if (isNaN(counterPrice) || counterPrice < 50) {
     return bot.sendMessage(userId, "❌ Invalid amount");
   }
 
@@ -185,21 +185,38 @@ if (pendingCounters[userId]) {
 
   delete pendingCounters[userId];
 
-  await bot.sendMessage(offer.runner_id,
+  await bot.sendMessage(
+    offer.runner_id,
 `💬 User countered your offer
 
-New price: ₦${counterPrice}`, {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Accept", callback_data: `accept_${offerId}` }
-        ],
-        [
-          { text: "💬 Counter Again", callback_data: `counter_runner_${offerId}` }
-        ]
+💰 New price: ₦${counterPrice}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+
+      [
+        {
+          text: "✅ Accept",
+          callback_data: `accept_${offerId}`
+        }
+      ],
+
+      [
+        {
+          text: "💬 Counter Again",
+          callback_data: `counter_runner_${offerId}`
+        }
+      ],
+
+      [
+        {
+          text: "❌ Reject",
+          callback_data: `reject_${offerId}`
+        }
       ]
-    }
-  });
+    ]
+  }
+});
 
   return;
 }
@@ -210,7 +227,7 @@ if (pendingRunnerCounters[userId]) {
   const offerId = pendingRunnerCounters[userId];
   const newPrice = Number(text);
 
-  if (isNaN(newPrice) || newPrice < 100) {
+  if (isNaN(newPrice) || newPrice < 50) {
     return bot.sendMessage(userId, "❌ Invalid amount");
   }
 
@@ -225,21 +242,38 @@ if (pendingRunnerCounters[userId]) {
 
   delete pendingRunnerCounters[userId];
 
-  await bot.sendMessage(offer.user_id,
+  await bot.sendMessage(
+    offer.user_id,
 `💬 Runner updated the offer
 
-New price: ₦${newPrice}`, {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅ Accept", callback_data: `accept_${offerId}` }
-        ],
-        [
-          { text: "💬 Counter", callback_data: `counter_${offerId}` }
-        ]
+💰 New price: ₦${newPrice}`,
+{
+  reply_markup: {
+    inline_keyboard: [
+
+      [
+        {
+          text: "✅ Accept",
+          callback_data: `accept_${offerId}`
+        }
+      ],
+
+      [
+        {
+          text: "💬 Counter Again",
+          callback_data: `counter_${offerId}`
+        }
+      ],
+
+      [
+        {
+          text: "❌ Reject",
+          callback_data: `reject_${offerId}`
+        }
       ]
-    }
-  });
+    ]
+  }
+});
 
   return;
 }
@@ -337,6 +371,8 @@ await bot.sendMessage(
 );
 
 return;
+
+  });
   
 
 // ================= CALLBACK =================
