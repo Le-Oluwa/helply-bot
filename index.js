@@ -430,20 +430,6 @@ if (data.startsWith("counter_")) {
 
   const offerId = data.split("_")[1];
 
-  // CHECK OFFER EXISTS
-  const { data: offer } = await supabase
-    .from("offers")
-    .select("id")
-    .eq("id", offerId)
-    .maybeSingle();
-
-  if (!offer) {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Negotiation expired",
-      show_alert: true
-    });
-  }
-
   pendingCounters[userId] = offerId;
 
   await bot.sendMessage(
@@ -453,24 +439,10 @@ if (data.startsWith("counter_")) {
 
   return bot.answerCallbackQuery(q.id);
 }
-  // RUNNER COUNTER BUTTON
+// RUNNER COUNTER BUTTON
 if (data.startsWith("counter_runner_")) {
 
   const offerId = data.split("_")[2];
-
-  // CHECK OFFER EXISTS
-  const { data: offer } = await supabase
-    .from("offers")
-    .select("id")
-    .eq("id", offerId)
-    .maybeSingle();
-
-  if (!offer) {
-    return bot.answerCallbackQuery(q.id, {
-      text: "❌ Negotiation expired",
-      show_alert: true
-    });
-  }
 
   pendingRunnerCounters[userId] = offerId;
 
