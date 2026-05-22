@@ -179,7 +179,7 @@ if (pendingCounters[userId]) {
     );
   }
 
-  // get offer
+  // GET OFFER FIRST
   const { data: offer } = await supabase
     .from("offers")
     .select("*")
@@ -193,7 +193,7 @@ if (pendingCounters[userId]) {
     );
   }
 
-  // update price
+  // UPDATE PRICE
   await supabase
     .from("offers")
     .update({
@@ -201,11 +201,11 @@ if (pendingCounters[userId]) {
     })
     .eq("id", offerId);
 
-  // ✅ KEEP BOTH SIDES ACTIVE FOREVER
+  // KEEP BOTH SIDES ACTIVE
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
-  // send runner message
+  // SEND TO RUNNER
   await bot.sendMessage(
     offer.runner_id,
 `💬 User countered your offer
@@ -241,6 +241,7 @@ if (pendingCounters[userId]) {
 
   return;
 }
+
 // ================= RUNNER COUNTER =================
 if (pendingRunnerCounters[userId]) {
 
@@ -255,7 +256,7 @@ if (pendingRunnerCounters[userId]) {
     );
   }
 
-  // get offer
+  // GET OFFER FIRST
   const { data: offer } = await supabase
     .from("offers")
     .select("*")
@@ -269,7 +270,7 @@ if (pendingRunnerCounters[userId]) {
     );
   }
 
-  // update price
+  // UPDATE PRICE
   await supabase
     .from("offers")
     .update({
@@ -277,11 +278,11 @@ if (pendingRunnerCounters[userId]) {
     })
     .eq("id", offerId);
 
-  // ✅ KEEP BOTH SIDES ACTIVE FOREVER
+  // KEEP BOTH SIDES ACTIVE
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
-  // send user message
+  // SEND TO USER
   await bot.sendMessage(
     offer.user_id,
 `💬 Runner updated the offer
@@ -317,7 +318,6 @@ if (pendingRunnerCounters[userId]) {
 
   return;
 }
-
   // ================= LOCATION STEP =================
 if (pendingOrders[userId]) {
 
