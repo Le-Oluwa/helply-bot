@@ -179,7 +179,7 @@ if (pendingCounters[userId]) {
     );
   }
 
-  // GET OFFER FIRST
+  // GET OFFER
   const { data: offer } = await supabase
     .from("offers")
     .select("*")
@@ -187,6 +187,8 @@ if (pendingCounters[userId]) {
     .maybeSingle();
 
   if (!offer) {
+    delete pendingCounters[userId];
+
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -205,7 +207,7 @@ if (pendingCounters[userId]) {
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
-  // SEND TO RUNNER
+  // SEND MESSAGE
   await bot.sendMessage(
     offer.runner_id,
 `💬 User countered your offer
@@ -241,7 +243,6 @@ if (pendingCounters[userId]) {
 
   return;
 }
-
 // ================= RUNNER COUNTER =================
 if (pendingRunnerCounters[userId]) {
 
@@ -256,7 +257,7 @@ if (pendingRunnerCounters[userId]) {
     );
   }
 
-  // GET OFFER FIRST
+  // GET OFFER
   const { data: offer } = await supabase
     .from("offers")
     .select("*")
@@ -264,6 +265,9 @@ if (pendingRunnerCounters[userId]) {
     .maybeSingle();
 
   if (!offer) {
+
+    delete pendingRunnerCounters[userId];
+
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -282,7 +286,7 @@ if (pendingRunnerCounters[userId]) {
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
-  // SEND TO USER
+  // SEND MESSAGE
   await bot.sendMessage(
     offer.user_id,
 `💬 Runner updated the offer
@@ -421,32 +425,62 @@ bot.on("callback_query", async (q) => {
   const data = q.data;
   const userId = q.from.id.toString();
 
-  // USER COUNTER
-  if (data.startsWith("counter_")) {
+// USER COUNTER BUTTON
+if (data.startsWith("counter_")) {
 
-    const offerId = data.split("_")[1];
+  const offerId = data.split("_")[1];
 
-    pendingCounters[userId] = offerId;
+  // CHECK OFFER EXISTS
+  const { data: offer } = await supabase
+    .from("offers")
+    .select("id")
+    .eq("id", offerId)
+    .maybeSingle();
 
-    await bot.sendMessage(userId,
-      "💬 Enter your counter offer amount:");
-
-    return bot.answerCallbackQuery(q.id);
+  if (!offer) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Negotiation expired",
+      show_alert: true
+    });
   }
 
-  // RUNNER COUNTER
-  if (data.startsWith("counter_runner_")) {
+  pendingCounters[userId] = offerId;
 
-    const offerId = data.split("_")[2];
+  await bot.sendMessage(
+    userId,
+    "💬 Enter your counter offer amount:"
+  );
 
-    pendingRunnerCounters[userId] = offerId;
+  return bot.answerCallbackQuery(q.id);
+}
+  // RUNNER COUNTER BUTTON
+if (data.startsWith("counter_runner_")) {
 
-    await bot.sendMessage(userId,
-      "💬 Enter your new offer amount:");
+  const offerId = data.split("_")[2];
 
-    return bot.answerCallbackQuery(q.id);
+  // CHECK OFFER EXISTS
+  const { data: offer } = await supabase
+    .from("offers")
+    .select("id")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (!offer) {
+    return bot.answerCallbackQuery(q.id, {
+      text: "❌ Negotiation expired",
+      show_alert: true
+    });
   }
 
+  pendingRunnerCounters[userId] = offerId;
+
+  await bot.sendMessage(
+    userId,
+    "💬 Enter your new offer amount:"
+  );
+
+  return bot.answerCallbackQuery(q.id);
+}
   // ... your other handlers below
   
   // REJECT OFFER
