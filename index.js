@@ -169,22 +169,43 @@ bot.on("message", async (msg) => {
 if (pendingCounters[userId]) {
 
   const offerId = pendingCounters[userId];
+
   const counterPrice = Number(text);
 
   if (isNaN(counterPrice) || counterPrice < 50) {
-    return bot.sendMessage(userId, "❌ Invalid amount");
+    return bot.sendMessage(
+      userId,
+      "❌ Invalid amount"
+    );
   }
 
+  // get offer
   const { data: offer } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (!offer) {
+    return bot.sendMessage(
+      userId,
+      "❌ Offer not found"
+    );
+  }
+
+  // update price
+  await supabase
     .from("offers")
     .update({
       current_price: counterPrice
     })
-    .eq("id", offerId)
-    .select()
-    .maybeSingle();
+    .eq("id", offerId);
 
+  // ✅ KEEP BOTH SIDES ACTIVE FOREVER
+  pendingCounters[offer.user_id] = offerId;
+  pendingRunnerCounters[offer.runner_id] = offerId;
 
+  // send runner message
   await bot.sendMessage(
     offer.runner_id,
 `💬 User countered your offer
@@ -220,27 +241,47 @@ if (pendingCounters[userId]) {
 
   return;
 }
-
 // ================= RUNNER COUNTER =================
 if (pendingRunnerCounters[userId]) {
 
   const offerId = pendingRunnerCounters[userId];
+
   const newPrice = Number(text);
 
   if (isNaN(newPrice) || newPrice < 50) {
-    return bot.sendMessage(userId, "❌ Invalid amount");
+    return bot.sendMessage(
+      userId,
+      "❌ Invalid amount"
+    );
   }
 
+  // get offer
   const { data: offer } = await supabase
+    .from("offers")
+    .select("*")
+    .eq("id", offerId)
+    .maybeSingle();
+
+  if (!offer) {
+    return bot.sendMessage(
+      userId,
+      "❌ Offer not found"
+    );
+  }
+
+  // update price
+  await supabase
     .from("offers")
     .update({
       current_price: newPrice
     })
-    .eq("id", offerId)
-    .select()
-    .maybeSingle();
+    .eq("id", offerId);
 
+  // ✅ KEEP BOTH SIDES ACTIVE FOREVER
+  pendingCounters[offer.user_id] = offerId;
+  pendingRunnerCounters[offer.runner_id] = offerId;
 
+  // send user message
   await bot.sendMessage(
     offer.user_id,
 `💬 Runner updated the offer
