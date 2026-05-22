@@ -638,9 +638,7 @@ if (data.startsWith("view_")) {
 });
 
   return bot.answerCallbackQuery(q.id);
-}
-    // ACCEPT OFFER
-   // ACCEPT OFFER
+}// ACCEPT OFFER
 if (data.startsWith("accept_")) {
 
   const id = data.split("_")[1];
@@ -658,10 +656,16 @@ if (data.startsWith("accept_")) {
   }
 
   const runnerFee = Number(o.current_price);
-  const runnerPayout = Math.round(runnerFee * 0.9);
-  const userPrice = Math.round(runnerFee * 1.3);
 
-  await supabase.from("orders")
+  const runnerPayout =
+    Math.round(runnerFee * 0.9);
+
+  const userPrice =
+    Math.round(runnerFee * 1.3);
+
+  // UPDATE ORDER
+  await supabase
+    .from("orders")
     .update({
       runner_id: o.runner_id,
       runner_username: o.runner_username,
@@ -674,10 +678,19 @@ if (data.startsWith("accept_")) {
     .eq("id", Number(o.order_id));
 
   // DELETE OTHER OFFERS
-  await supabase.from("offers")
+  await supabase
+    .from("offers")
     .delete()
     .eq("order_id", String(o.order_id));
 
+  // ✅ CLEAR NEGOTIATION STATES
+  delete pendingCounters[o.user_id];
+  delete pendingRunnerCounters[o.user_id];
+
+  delete pendingCounters[o.runner_id];
+  delete pendingRunnerCounters[o.runner_id];
+
+  // PAYMENT LINK
   const link =
 `${BASE_URL}/create-payment?orderId=${o.order_id}`;
 
