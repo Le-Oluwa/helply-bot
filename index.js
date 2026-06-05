@@ -832,13 +832,14 @@ if (data.startsWith("cancel_")) {
     .eq("order_id", String(id));
 
   // REPOST TO GROUP
-  await bot.sendMessage(
-    RUNNER_GROUP_ID,
+await bot.sendMessage(
+  RUNNER_GROUP_ID,
 `🚨 REPOSTED REQUEST
 
 🆔 ${order.id}
 📌 ${order.delivery_location}`,
 {
+  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
