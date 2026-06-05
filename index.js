@@ -644,6 +644,14 @@ if (data.startsWith("adj_")) {
       await bot.sendMessage(order.user_id, "💰 Offers:", {
         reply_markup: { inline_keyboard: buttons }
       });
+      await bot.sendMessage(
+  userId,
+`⏳ Offer submitted successfully
+
+💰 Your Offer: ₦${price}
+
+Waiting for the user to accept, counter, or reject your offer.`
+);
 
       return bot.answerCallbackQuery(q.id);
     }
