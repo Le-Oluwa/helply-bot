@@ -117,6 +117,11 @@ By continuing, you agree to these Terms & Conditions.`,
 
 Send your request`);
 });
+
+bot.on("message", (msg) => {
+  console.log("CHAT ID:", msg.chat.id);
+});
+
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
   if (!msg.text || msg.text.startsWith("/")) return;
