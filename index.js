@@ -10,6 +10,11 @@ app.use(express.json());
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
+// TEMPORARY TOPIC LOGGER
+bot.on("message", (msg) => {
+  console.log("THREAD ID:", msg.message_thread_id);
+});
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
