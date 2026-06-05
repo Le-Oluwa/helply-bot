@@ -10,17 +10,13 @@ app.use(express.json());
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// TEMPORARY TOPIC LOGGER
-bot.on("message", (msg) => {
-  console.log("THREAD ID:", msg.message_thread_id);
-});
-
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
+const GIGS_TOPIC_ID = 2;
 const BASE_URL = process.env.BASE_URL;
 const pendingCounters = {};
 const pendingOrders = {};
@@ -369,8 +365,8 @@ ${locationText}`
   );
 
   // send to runner group
-  await bot.sendMessage(
-    RUNNER_GROUP_ID,
+await bot.sendMessage(
+  RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
@@ -381,6 +377,7 @@ ${requestText}
 📍 Location:
 ${locationText}`,
 {
+  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
