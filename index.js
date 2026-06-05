@@ -1,18 +1,3 @@
-bot.on("message", async (msg) => {
-
-  // Ignore all groups
-  if (msg.chat.type !== "private") {
-    return;
-  }
-
-  if (!msg.text || msg.text.startsWith("/")) return;
-
-  const userId = msg.from.id.toString();
-  const text = msg.text;
-
-  // rest of code...
-
-
 // ================= REQUIRE =================
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
