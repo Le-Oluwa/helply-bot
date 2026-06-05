@@ -11,7 +11,7 @@ bot.on("message", async (msg) => {
   const text = msg.text;
 
   // rest of code...
-});
+
 
 // ================= REQUIRE =================
 require("dotenv").config();
