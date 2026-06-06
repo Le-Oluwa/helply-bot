@@ -429,42 +429,47 @@ return;
 bot.on("callback_query", async (q) => {
 
   const data = q.data;
-  const userId = q.from.id.toString();
+  const userId = String(q.from.id);
 
-// USER COUNTER BUTTON
-if (data.startsWith("counter_")) {
+  // RUNNER COUNTER FIRST
+  if (data.startsWith("counter_runner_")) {
 
-  const offerId = data.split("_")[1];
+    const offerId =
+      data.replace("counter_runner_", "");
 
-  pendingCounters[userId] = offerId;
+    pendingRunnerCounters[userId] = offerId;
 
-  await bot.sendMessage(
-    userId,
-    "💬 Enter your counter offer amount:"
-  );
+    await bot.sendMessage(
+      userId,
+      "💬 Enter your new offer amount:"
+    );
 
-  return bot.answerCallbackQuery(q.id);
-}
-// RUNNER COUNTER BUTTON
-if (data.startsWith("counter_runner_")) {
+    return bot.answerCallbackQuery(q.id);
+  }
 
-  const offerId = data.split("_")[2];
+  // USER COUNTER SECOND
+  if (data.startsWith("counter_")) {
 
-  pendingRunnerCounters[userId] = offerId;
+    const offerId =
+      data.replace("counter_", "");
 
-  await bot.sendMessage(
-    userId,
-    "💬 Enter your new offer amount:"
-  );
+    pendingCounters[userId] = offerId;
 
-  return bot.answerCallbackQuery(q.id);
-}
+    await bot.sendMessage(
+      userId,
+      "💬 Enter your counter offer amount:"
+    );
+
+    return bot.answerCallbackQuery(q.id);
+  }
+
+});
   // ... your other handlers below
   
   // REJECT OFFER
 if (data.startsWith("reject_")) {
 
-  const offerId = data.split("_")[1];
+  const offerId = data.replace("reject_", "");
 
   await supabase
     .from("offers")
@@ -665,7 +670,7 @@ Waiting for the user to accept, counter, or reject your offer.`
     // VIEW OFFER
 if (data.startsWith("view_")) {
 
-  const id = data.split("_")[1];
+  const id = data.replace("view_", "");
 
   const { data: o } = await supabase
     .from("offers")
@@ -702,7 +707,7 @@ if (data.startsWith("view_")) {
 }// ACCEPT OFFER
 if (data.startsWith("accept_")) {
 
-  const id = data.split("_")[1];
+  const id = data.replace("accept_", "");
 
   const { data: o } = await supabase
     .from("offers")
