@@ -16,7 +16,6 @@ const supabase = createClient(
 );
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
-const GIGS_TOPIC_ID = 2;
 const BASE_URL = process.env.BASE_URL;
 const pendingCounters = {};
 const pendingOrders = {};
@@ -194,7 +193,8 @@ if (pendingCounters[userId]) {
     .maybeSingle();
 
   if (!offer) {
-    
+    delete pendingCounters[userId];
+
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -272,6 +272,8 @@ if (pendingRunnerCounters[userId]) {
 
   if (!offer) {
 
+    delete pendingRunnerCounters[userId];
+
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -286,7 +288,7 @@ if (pendingRunnerCounters[userId]) {
     })
     .eq("id", offerId);
 
-    // KEEP BOTH SIDES ACTIVE
+  // KEEP BOTH SIDES ACTIVE
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
@@ -362,8 +364,8 @@ ${locationText}`
   );
 
   // send to runner group
-await bot.sendMessage(
-  RUNNER_GROUP_ID,
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
@@ -374,7 +376,6 @@ ${requestText}
 📍 Location:
 ${locationText}`,
 {
-  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
@@ -829,14 +830,13 @@ if (data.startsWith("cancel_")) {
     .eq("order_id", String(id));
 
   // REPOST TO GROUP
-await bot.sendMessage(
-  RUNNER_GROUP_ID,
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
 `🚨 REPOSTED REQUEST
 
 🆔 ${order.id}
 📌 ${order.delivery_location}`,
 {
-  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
