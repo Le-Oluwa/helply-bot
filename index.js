@@ -16,6 +16,7 @@ const supabase = createClient(
 );
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
+const GIGS_TOPIC_ID = 2;
 const BASE_URL = process.env.BASE_URL;
 const pendingCounters = {};
 const pendingOrders = {};
@@ -193,8 +194,7 @@ if (pendingCounters[userId]) {
     .maybeSingle();
 
   if (!offer) {
-    delete pendingCounters[userId];
-
+    
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -272,8 +272,6 @@ if (pendingRunnerCounters[userId]) {
 
   if (!offer) {
 
-    delete pendingRunnerCounters[userId];
-
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -288,7 +286,7 @@ if (pendingRunnerCounters[userId]) {
     })
     .eq("id", offerId);
 
-  // KEEP BOTH SIDES ACTIVE
+    // KEEP BOTH SIDES ACTIVE
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
@@ -364,8 +362,8 @@ ${locationText}`
   );
 
   // send to runner group
-  await bot.sendMessage(
-    RUNNER_GROUP_ID,
+await bot.sendMessage(
+  RUNNER_GROUP_ID,
 `🚨 NEW REQUEST
 
 🆔 ${taskId}
@@ -376,6 +374,7 @@ ${requestText}
 📍 Location:
 ${locationText}`,
 {
+  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
@@ -429,47 +428,42 @@ return;
 bot.on("callback_query", async (q) => {
 
   const data = q.data;
-  const userId = String(q.from.id);
+  const userId = q.from.id.toString();
 
-  // RUNNER COUNTER FIRST
-  if (data.startsWith("counter_runner_")) {
+// USER COUNTER BUTTON
+if (data.startsWith("counter_")) {
 
-    const offerId =
-      data.replace("counter_runner_", "");
+  const offerId = data.split("_")[1];
 
-    pendingRunnerCounters[userId] = offerId;
+  pendingCounters[userId] = offerId;
 
-    await bot.sendMessage(
-      userId,
-      "💬 Enter your new offer amount:"
-    );
+  await bot.sendMessage(
+    userId,
+    "💬 Enter your counter offer amount:"
+  );
 
-    return bot.answerCallbackQuery(q.id);
-  }
+  return bot.answerCallbackQuery(q.id);
+}
+// RUNNER COUNTER BUTTON
+if (data.startsWith("counter_runner_")) {
 
-  // USER COUNTER SECOND
-  if (data.startsWith("counter_")) {
+  const offerId = data.split("_")[2];
 
-    const offerId =
-      data.replace("counter_", "");
+  pendingRunnerCounters[userId] = offerId;
 
-    pendingCounters[userId] = offerId;
+  await bot.sendMessage(
+    userId,
+    "💬 Enter your new offer amount:"
+  );
 
-    await bot.sendMessage(
-      userId,
-      "💬 Enter your counter offer amount:"
-    );
-
-    return bot.answerCallbackQuery(q.id);
-  }
-
-});
+  return bot.answerCallbackQuery(q.id);
+}
   // ... your other handlers below
   
   // REJECT OFFER
 if (data.startsWith("reject_")) {
 
-  const offerId = data.replace("reject_", "");
+  const offerId = data.split("_")[1];
 
   await supabase
     .from("offers")
@@ -670,7 +664,7 @@ Waiting for the user to accept, counter, or reject your offer.`
     // VIEW OFFER
 if (data.startsWith("view_")) {
 
-  const id = data.replace("view_", "");
+  const id = data.split("_")[1];
 
   const { data: o } = await supabase
     .from("offers")
@@ -707,7 +701,7 @@ if (data.startsWith("view_")) {
 }// ACCEPT OFFER
 if (data.startsWith("accept_")) {
 
-  const id = data.replace("accept_", "");
+  const id = data.split("_")[1];
 
   const { data: o } = await supabase
     .from("offers")
@@ -835,13 +829,14 @@ if (data.startsWith("cancel_")) {
     .eq("order_id", String(id));
 
   // REPOST TO GROUP
-  await bot.sendMessage(
-    RUNNER_GROUP_ID,
+await bot.sendMessage(
+  RUNNER_GROUP_ID,
 `🚨 REPOSTED REQUEST
 
 🆔 ${order.id}
 📌 ${order.delivery_location}`,
 {
+  message_thread_id: GIGS_TOPIC_ID,
   reply_markup: {
     inline_keyboard: [
       [
