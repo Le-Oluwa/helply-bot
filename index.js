@@ -194,8 +194,7 @@ if (pendingCounters[userId]) {
     .maybeSingle();
 
   if (!offer) {
-    delete pendingCounters[userId];
-
+    
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -273,8 +272,6 @@ if (pendingRunnerCounters[userId]) {
 
   if (!offer) {
 
-    delete pendingRunnerCounters[userId];
-
     return bot.sendMessage(
       userId,
       "❌ Offer not found"
@@ -289,7 +286,7 @@ if (pendingRunnerCounters[userId]) {
     })
     .eq("id", offerId);
 
-  // KEEP BOTH SIDES ACTIVE
+    // KEEP BOTH SIDES ACTIVE
   pendingCounters[offer.user_id] = offerId;
   pendingRunnerCounters[offer.runner_id] = offerId;
 
