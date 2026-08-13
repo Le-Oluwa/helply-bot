@@ -150,6 +150,96 @@ async function sendOfferAdjuster(chatId, taskId, price, editMessageId) {
   return bot.sendMessage(chatId, text, { reply_markup: keyboard });
 }
 
+// ================= STATS / EARNINGS =================
+
+function formatNaira(n) {
+  return `₦${Number(n || 0).toLocaleString("en-NG")}`;
+}
+
+function startOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0 = Sunday
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+// Pulls every completed task where this user was the runner, plus any
+// currently in-progress (paid, not yet completed) tasks so runners can see
+// money that's "on the way" as well as money already banked.
+async function computeRunnerStats(userId) {
+  const now = new Date();
+  const weekStart = startOfWeek(now);
+  const monthStart = startOfMonth(now);
+
+  const { data: completed, error: completedErr } = await supabase
+    .from("orders")
+    .select("runner_payout, created_at")
+    .eq("runner_id", userId)
+    .eq("status", "completed");
+
+  if (completedErr) console.log("STATS COMPLETED ERROR:", completedErr.message);
+
+  const { data: pending, error: pendingErr } = await supabase
+    .from("orders")
+    .select("runner_payout")
+    .eq("runner_id", userId)
+    .eq("status", "in_progress")
+    .eq("payment_status", "paid");
+
+  if (pendingErr) console.log("STATS PENDING ERROR:", pendingErr.message);
+
+  const rows = completed || [];
+  const pendingRows = pending || [];
+
+  const totalTasks = rows.length;
+  const totalEarned = rows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const weekEarned = rows
+    .filter(r => r.created_at && new Date(r.created_at) >= weekStart)
+    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const monthEarned = rows
+    .filter(r => r.created_at && new Date(r.created_at) >= monthStart)
+    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const avgPerTask = totalTasks > 0 ? Math.round(totalEarned / totalTasks) : 0;
+
+  const pendingCount = pendingRows.length;
+  const pendingEarnings = pendingRows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  return {
+    totalTasks,
+    totalEarned,
+    weekEarned,
+    monthEarned,
+    avgPerTask,
+    pendingCount,
+    pendingEarnings
+  };
+}
+
+function formatRunnerStats(stats) {
+  let text = `📊 *Your Helper Stats*\n\n`;
+  text += `✅ Tasks completed: *${stats.totalTasks}*\n`;
+  text += `💰 Total earned: *${formatNaira(stats.totalEarned)}*\n`;
+  text += `📈 Avg per task: *${formatNaira(stats.avgPerTask)}*\n\n`;
+  text += `📅 This week: *${formatNaira(stats.weekEarned)}*\n`;
+  text += `🗓️ This month: *${formatNaira(stats.monthEarned)}*\n`;
+
+  if (stats.pendingCount > 0) {
+    text += `\n⏳ Active: *${stats.pendingCount}* task(s) worth *${formatNaira(stats.pendingEarnings)}* once completed`;
+  } else if (stats.totalTasks === 0) {
+    text += `\nNo completed tasks yet — accept a request from the runner group to get started!`;
+  }
+
+  return text;
+}
+
 // ================= START / CANCEL =================
 
 bot.onText(/\/start/, async (msg) => {
@@ -176,7 +266,7 @@ bot.onText(/\/start/, async (msg) => {
   }
 
   clearPendingState(userId);
-  return bot.sendMessage(userId, "🚀 Welcome back to Helply\n\nSend your request");
+  return bot.sendMessage(userId, "🚀 Welcome back to Helply\n\nSend your request, or use /stats to see your Helper earnings.");
 });
 
 // Escape hatch: previously there was no way to unstick a user whose
@@ -188,6 +278,24 @@ bot.onText(/\/cancel/, async (msg) => {
     return bot.sendMessage(userId, "✅ Cancelled. Send a new request whenever you're ready.");
   }
   return bot.sendMessage(userId, "Nothing to cancel.");
+});
+
+// Runner earnings dashboard.
+bot.onText(/\/stats/, async (msg) => {
+  const userId = msg.from.id.toString();
+
+  const { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
+  if (!user) {
+    return bot.sendMessage(userId, "⚠️ Send /start first.");
+  }
+
+  try {
+    const stats = await computeRunnerStats(userId);
+    return bot.sendMessage(userId, formatRunnerStats(stats), { parse_mode: "Markdown" });
+  } catch (err) {
+    console.log("STATS ERROR:", err.message);
+    return bot.sendMessage(userId, "❌ Couldn't load your stats right now. Try again shortly.");
+  }
 });
 
 // ================= MESSAGE =================
@@ -371,6 +479,13 @@ bot.on("callback_query", async (q) => {
     }
     if (data === "decline_terms") {
       await bot.sendMessage(userId, "You need to accept the terms to use Helply. Send /start when you're ready.");
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // STATS BUTTON (shown after task completion)
+    if (data === "view_stats") {
+      const stats = await computeRunnerStats(userId);
+      await bot.sendMessage(userId, formatRunnerStats(stats), { parse_mode: "Markdown" });
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -591,7 +706,8 @@ bot.on("callback_query", async (q) => {
 
       await bot.sendMessage(
         order.runner_id,
-        `✅ Task ended successfully\n\n⚠️ For disputes or support:\n\n📧 ${SUPPORT_EMAIL}\n\nRequest ID: ${order.id}`
+        `✅ Task ended successfully\n\n⚠️ For disputes or support:\n\n📧 ${SUPPORT_EMAIL}\n\nRequest ID: ${order.id}`,
+        { reply_markup: { inline_keyboard: [[{ text: "📊 View My Stats", callback_data: "view_stats" }]] } }
       );
       await bot.sendMessage(
         order.user_id,
