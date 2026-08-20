@@ -1,5 +1,5 @@
 // Required env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, RUNNER_GROUP_ID,
-// BASE_URL, FLW_WEBHOOK_SECRET
+// BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
@@ -18,6 +18,7 @@ const GIGS_TOPIC_ID = 2;
 const BASE_URL = process.env.BASE_URL;
 const MIN_PRICE = 50;
 const SUPPORT_EMAIL = "helply.cu@gmail.com";
+const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
 
 const TERMS_TEXT = `📜 *Helply Terms & Conditions*
 
@@ -57,11 +58,6 @@ Accounts may be suspended for:
 By continuing, you agree to these Terms & Conditions.`;
 
 // ================= STATE =================
-// Single source of truth for "what is this user in the middle of doing".
-// pendingState[userId] = { mode, ...context }
-// modes: "location" | "counter" | "runner_counter" | "offer_amount"
-// This replaces the old pendingCounters / pendingRunnerCounters / pendingOrders
-// objects, which could get out of sync and leave users permanently stuck.
 const pendingState = {};
 
 function clearPendingState(userId) {
@@ -79,9 +75,6 @@ async function isBusy(userId) {
   return !!(data && data.length > 0);
 }
 
-// True while the user has an offer sitting in negotiation (before it's
-// accepted/rejected). Used to stop stray messages from being treated as a
-// brand-new task request while a negotiation is still open.
 async function hasActiveNegotiation(userId) {
   const { data } = await supabase
     .from("offers")
@@ -99,6 +92,27 @@ async function getOffer(offerId) {
 async function getOrder(orderId) {
   const { data } = await supabase.from("orders").select("*").eq("id", Number(orderId)).maybeSingle();
   return data;
+}
+
+async function getUser(userId) {
+  const { data } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
+  return data;
+}
+
+// Audit trail for every moderation/dispute action an admin takes.
+async function logAdminAction(adminId, action, { orderId, targetUserId, note } = {}) {
+  const { error } = await supabase.from("admin_actions").insert([{
+    admin_id: adminId,
+    action,
+    order_id: orderId ? String(orderId) : null,
+    target_user_id: targetUserId || null,
+    note: note || null
+  }]);
+  if (error) console.log("ADMIN ACTION LOG ERROR:", error.message);
+}
+
+function banMessage(user) {
+  return `🚫 Your Helply account has been suspended.${user?.ban_reason ? `\n\nReason: ${user.ban_reason}` : ""}\n\nContact ${SUPPORT_EMAIL} if you think this is a mistake.`;
 }
 
 function offerButtons(offerId, forRunner) {
@@ -150,94 +164,17 @@ async function sendOfferAdjuster(chatId, taskId, price, editMessageId) {
   return bot.sendMessage(chatId, text, { reply_markup: keyboard });
 }
 
-// ================= STATS / EARNINGS =================
-
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString("en-NG")}`;
 }
 
-function startOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0 = Sunday
-  d.setDate(d.getDate() - day);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
+// ================= ADMIN ACCESS =================
 
-function startOfMonth(date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-// Pulls every completed task where this user was the runner, plus any
-// currently in-progress (paid, not yet completed) tasks so runners can see
-// money that's "on the way" as well as money already banked.
-async function computeRunnerStats(userId) {
-  const now = new Date();
-  const weekStart = startOfWeek(now);
-  const monthStart = startOfMonth(now);
-
-  const { data: completed, error: completedErr } = await supabase
-    .from("orders")
-    .select("runner_payout, created_at")
-    .eq("runner_id", userId)
-    .eq("status", "completed");
-
-  if (completedErr) console.log("STATS COMPLETED ERROR:", completedErr.message);
-
-  const { data: pending, error: pendingErr } = await supabase
-    .from("orders")
-    .select("runner_payout")
-    .eq("runner_id", userId)
-    .eq("status", "in_progress")
-    .eq("payment_status", "paid");
-
-  if (pendingErr) console.log("STATS PENDING ERROR:", pendingErr.message);
-
-  const rows = completed || [];
-  const pendingRows = pending || [];
-
-  const totalTasks = rows.length;
-  const totalEarned = rows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
-
-  const weekEarned = rows
-    .filter(r => r.created_at && new Date(r.created_at) >= weekStart)
-    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
-
-  const monthEarned = rows
-    .filter(r => r.created_at && new Date(r.created_at) >= monthStart)
-    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
-
-  const avgPerTask = totalTasks > 0 ? Math.round(totalEarned / totalTasks) : 0;
-
-  const pendingCount = pendingRows.length;
-  const pendingEarnings = pendingRows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
-
-  return {
-    totalTasks,
-    totalEarned,
-    weekEarned,
-    monthEarned,
-    avgPerTask,
-    pendingCount,
-    pendingEarnings
-  };
-}
-
-function formatRunnerStats(stats) {
-  let text = `📊 *Your Helper Stats*\n\n`;
-  text += `✅ Tasks completed: *${stats.totalTasks}*\n`;
-  text += `💰 Total earned: *${formatNaira(stats.totalEarned)}*\n`;
-  text += `📈 Avg per task: *${formatNaira(stats.avgPerTask)}*\n\n`;
-  text += `📅 This week: *${formatNaira(stats.weekEarned)}*\n`;
-  text += `🗓️ This month: *${formatNaira(stats.monthEarned)}*\n`;
-
-  if (stats.pendingCount > 0) {
-    text += `\n⏳ Active: *${stats.pendingCount}* task(s) worth *${formatNaira(stats.pendingEarnings)}* once completed`;
-  } else if (stats.totalTasks === 0) {
-    text += `\nNo completed tasks yet — accept a request from the runner group to get started!`;
-  }
-
-  return text;
+const ADMIN_IDS = new Set(
+  (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean)
+);
+function isAdmin(userId) {
+  return ADMIN_IDS.has(userId);
 }
 
 // ================= START / CANCEL =================
@@ -253,6 +190,10 @@ bot.onText(/\/start/, async (msg) => {
     user = { id: userId, accepted_terms: false };
   }
 
+  if (user.banned) {
+    return bot.sendMessage(userId, banMessage(user));
+  }
+
   if (!user.accepted_terms) {
     return bot.sendMessage(userId, TERMS_TEXT, {
       parse_mode: "Markdown",
@@ -266,11 +207,28 @@ bot.onText(/\/start/, async (msg) => {
   }
 
   clearPendingState(userId);
-  return bot.sendMessage(userId, "🚀 Welcome back to Helply\n\nSend your request, or use /stats to see your Helper earnings.");
+  return bot.sendMessage(userId, "🚀 Welcome back to Helply\n\nSend your request, or become a Helper and start earning.", {
+    reply_markup: {
+      inline_keyboard: [[{ text: "🏃 Become a Helper", url: RUNNER_SIGNUP_FORM_URL }]]
+    }
+  });
 });
 
-// Escape hatch: previously there was no way to unstick a user whose
-// pending state got out of sync. Now they can always reset with /cancel.
+// Standalone command in case someone wants the signup link without
+// re-reading the whole welcome message.
+bot.onText(/\/becomehelper/, async (msg) => {
+  const userId = msg.from.id.toString();
+  return bot.sendMessage(
+    userId,
+    "🏃 Want to earn money completing tasks on campus?\n\nFill out the Helper signup form to get started:",
+    {
+      reply_markup: {
+        inline_keyboard: [[{ text: "📝 Sign up as a Helper", url: RUNNER_SIGNUP_FORM_URL }]]
+      }
+    }
+  );
+});
+
 bot.onText(/\/cancel/, async (msg) => {
   const userId = msg.from.id.toString();
   if (pendingState[userId]) {
@@ -280,22 +238,144 @@ bot.onText(/\/cancel/, async (msg) => {
   return bot.sendMessage(userId, "Nothing to cancel.");
 });
 
-// Runner earnings dashboard.
-bot.onText(/\/stats/, async (msg) => {
+// ===== ADMIN: ORDERS & USERS =====
+
+bot.onText(/^\/admin$/, async (msg) => {
   const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
 
-  const { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
-  if (!user) {
-    return bot.sendMessage(userId, "⚠️ Send /start first.");
+  const text = `🛠️ *Admin Commands*
+
+*Orders*
+/activeorders — list open, matched, and in-progress orders
+/order <id> — view an order and resolve a dispute
+
+*Users*
+/ban <userId> [reason]
+/unban <userId>
+/banned — list currently banned users`;
+
+  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/activeorders/, async (msg) => {
+  const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
+
+  const { data: orders, error } = await supabase
+    .from("orders")
+    .select("id, status, user_username, runner_username, total_price")
+    .in("status", ["open", "matched", "in_progress"])
+    .order("id", { ascending: false })
+    .limit(25);
+
+  if (error) {
+    console.log("ACTIVEORDERS ERROR:", error.message);
+    return bot.sendMessage(userId, "❌ Couldn't load orders right now.");
   }
 
-  try {
-    const stats = await computeRunnerStats(userId);
-    return bot.sendMessage(userId, formatRunnerStats(stats), { parse_mode: "Markdown" });
-  } catch (err) {
-    console.log("STATS ERROR:", err.message);
-    return bot.sendMessage(userId, "❌ Couldn't load your stats right now. Try again shortly.");
+  if (!orders || orders.length === 0) {
+    return bot.sendMessage(userId, "✅ No active orders right now.");
   }
+
+  const statusEmoji = { open: "🟡", matched: "🟠", in_progress: "🟢" };
+
+  let text = `📋 *Active Orders* (${orders.length})\n\n`;
+  orders.forEach(o => {
+    text += `${statusEmoji[o.status] || "⚪"} #${o.id} — ${o.status} — @${o.user_username || "?"}`;
+    text += o.runner_username ? ` → @${o.runner_username}` : ` → unassigned`;
+    if (o.total_price) text += ` — ${formatNaira(o.total_price)}`;
+    text += `\n`;
+  });
+  text += `\nUse /order <id> for details or to resolve.`;
+
+  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/order (\d+)/, async (msg, match) => {
+  const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
+
+  const order = await getOrder(match[1]);
+  if (!order) return bot.sendMessage(userId, "❌ Order not found.");
+
+  const text = `📦 *Order #${order.id}*
+
+Status: *${order.status}* | Payment: *${order.payment_status}*
+
+👤 Requester: @${order.user_username || "unknown"} (\`${order.user_id}\`)
+🏃 Runner: ${order.runner_id ? `@${order.runner_username || "unknown"} (\`${order.runner_id}\`)` : "unassigned"}
+
+📦 Request: ${order.request_text || "—"}
+📍 Location: ${order.delivery_location || "—"}
+
+💰 Agreed price: ${formatNaira(order.agreed_price)}
+💵 Runner payout: ${formatNaira(order.runner_payout)}
+💳 Total charged: ${formatNaira(order.total_price)}`;
+
+  const buttons = [];
+  if (order.status !== "completed") {
+    buttons.push([{ text: "✅ Force complete", callback_data: `admin_complete_${order.id}` }]);
+  }
+  if (order.status === "matched" || order.status === "in_progress") {
+    buttons.push([{ text: "🔄 Reset to open", callback_data: `admin_reset_${order.id}` }]);
+  }
+  if (order.payment_status === "paid") {
+    buttons.push([{ text: "💵 Mark refunded", callback_data: `admin_refund_${order.id}` }]);
+  }
+  buttons.push([{ text: "🗑 Void order", callback_data: `admin_void_${order.id}` }]);
+
+  const userButtons = [{ text: "🚫 Ban requester", callback_data: `adminban_${order.user_id}_${order.id}` }];
+  if (order.runner_id) userButtons.push({ text: "🚫 Ban runner", callback_data: `adminban_${order.runner_id}_${order.id}` });
+  buttons.push(userButtons);
+
+  return bot.sendMessage(userId, text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
+});
+
+bot.onText(/\/ban (\d+)(?:\s+(.+))?/, async (msg, match) => {
+  const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
+
+  const targetId = match[1];
+  const reason = match[2] || null;
+
+  await supabase.from("users").update({
+    banned: true,
+    ban_reason: reason,
+    banned_at: new Date().toISOString()
+  }).eq("id", targetId);
+
+  await logAdminAction(userId, "ban_user", { targetUserId: targetId, note: reason });
+
+  await bot.sendMessage(targetId, banMessage({ ban_reason: reason })).catch(() => {});
+  return bot.sendMessage(userId, `✅ User \`${targetId}\` banned${reason ? ` — ${reason}` : ""}.`, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/unban (\d+)/, async (msg, match) => {
+  const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
+
+  const targetId = match[1];
+  await supabase.from("users").update({ banned: false, ban_reason: null, banned_at: null }).eq("id", targetId);
+  await logAdminAction(userId, "unban_user", { targetUserId: targetId });
+
+  await bot.sendMessage(targetId, "✅ Your Helply account has been reinstated. Send /start to continue.").catch(() => {});
+  return bot.sendMessage(userId, `✅ User \`${targetId}\` unbanned.`, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/banned/, async (msg) => {
+  const userId = msg.from.id.toString();
+  if (!isAdmin(userId)) return;
+
+  const { data: users } = await supabase.from("users").select("id, username, ban_reason").eq("banned", true);
+  if (!users || users.length === 0) return bot.sendMessage(userId, "✅ No banned users.");
+
+  let text = `🚫 *Banned Users* (${users.length})\n\n`;
+  users.forEach(u => {
+    text += `\`${u.id}\` — @${u.username || "unknown"}${u.ban_reason ? ` — ${u.ban_reason}` : ""}\n`;
+  });
+
+  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
 });
 
 // ================= MESSAGE =================
@@ -319,6 +399,10 @@ bot.on("message", async (msg) => {
       return bot.sendMessage(userId, "❌ Error creating account");
     }
     currentUser = { id: userId, accepted_terms: true };
+  }
+
+  if (currentUser.banned) {
+    return bot.sendMessage(userId, banMessage(currentUser));
   }
 
   if (!currentUser.accepted_terms) {
@@ -471,6 +555,129 @@ bot.on("callback_query", async (q) => {
   const userId = q.from.id.toString();
 
   try {
+    // BAN GATE — a banned user can't do anything else with the bot.
+    if (!isAdmin(userId)) {
+      const requester = await getUser(userId);
+      if (requester?.banned) {
+        return denyCallback(q, "🚫 Your account has been suspended.");
+      }
+    }
+
+    // ===== ADMIN: ORDER RESOLUTION =====
+
+    if (data.startsWith("admin_complete_")) {
+      if (!isAdmin(userId)) return denyCallback(q);
+      const orderId = data.split("_")[2];
+      const order = await getOrder(orderId);
+      if (!order) return denyCallback(q, "❌ Order not found");
+
+      await supabase.from("orders").update({ status: "completed" }).eq("id", Number(orderId));
+      await logAdminAction(userId, "force_complete", { orderId });
+
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
+      }
+      await bot.sendMessage(order.user_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
+
+      await bot.sendMessage(userId, `✅ Order #${order.id} marked completed.`);
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    if (data.startsWith("admin_reset_")) {
+      if (!isAdmin(userId)) return denyCallback(q);
+      const orderId = data.split("_")[2];
+      const order = await getOrder(orderId);
+      if (!order) return denyCallback(q, "❌ Order not found");
+
+      await supabase.from("orders").update({
+        runner_id: null,
+        runner_username: null,
+        agreed_price: null,
+        runner_payout: null,
+        total_price: null,
+        status: "open",
+        payment_status: "pending"
+      }).eq("id", Number(orderId));
+      await supabase.from("offers").delete().eq("order_id", String(orderId));
+      await logAdminAction(userId, "reset_to_open", { orderId });
+
+      await bot.sendMessage(order.user_id, `🔄 Your request #${order.id} was reset by an admin and is open for new offers again.`).catch(() => {});
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id, `🔄 Task #${order.id} was unassigned by an admin.`).catch(() => {});
+      }
+      await bot.sendMessage(
+        RUNNER_GROUP_ID,
+        `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n📌 ${order.delivery_location}`,
+        {
+          message_thread_id: GIGS_TOPIC_ID,
+          reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
+        }
+      );
+
+      await bot.sendMessage(userId, `✅ Order #${order.id} reset to open.`);
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    if (data.startsWith("admin_refund_")) {
+      if (!isAdmin(userId)) return denyCallback(q);
+      const orderId = data.split("_")[2];
+      const order = await getOrder(orderId);
+      if (!order) return denyCallback(q, "❌ Order not found");
+
+      await supabase.from("orders").update({ status: "refunded", payment_status: "refunded" }).eq("id", Number(orderId));
+      await logAdminAction(userId, "mark_refunded", { orderId });
+
+      await bot.sendMessage(order.user_id, `💵 Your payment for task #${order.id} has been marked for refund by an admin. Reach out to ${SUPPORT_EMAIL} with any questions.`).catch(() => {});
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id, `⚠️ Task #${order.id} was cancelled and refunded by an admin.`).catch(() => {});
+      }
+
+      await bot.sendMessage(
+        userId,
+        `⚠️ Order #${order.id} marked refunded in Helply's records.\n\n*This does not trigger an actual Flutterwave refund* — process that manually in your Flutterwave dashboard.`,
+        { parse_mode: "Markdown" }
+      );
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    if (data.startsWith("admin_void_")) {
+      if (!isAdmin(userId)) return denyCallback(q);
+      const orderId = data.split("_")[2];
+      const order = await getOrder(orderId);
+      if (!order) return denyCallback(q, "❌ Order not found");
+
+      await supabase.from("orders").update({ status: "voided" }).eq("id", Number(orderId));
+      await supabase.from("offers").delete().eq("order_id", String(orderId));
+      await logAdminAction(userId, "void_order", { orderId });
+
+      await bot.sendMessage(order.user_id, `🗑 Your request #${order.id} was removed by an admin.\n\nContact ${SUPPORT_EMAIL} if you have questions.`).catch(() => {});
+      if (order.runner_id) {
+        await bot.sendMessage(order.runner_id, `🗑 Task #${order.id} was removed by an admin.`).catch(() => {});
+      }
+
+      await bot.sendMessage(userId, `✅ Order #${order.id} voided.`);
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    if (data.startsWith("adminban_")) {
+      if (!isAdmin(userId)) return denyCallback(q);
+      const parts = data.split("_"); // adminban_<targetId>_<orderId>
+      const targetId = parts[1];
+      const orderId = parts[2];
+
+      await supabase.from("users").update({
+        banned: true,
+        ban_reason: `Banned from order #${orderId}`,
+        banned_at: new Date().toISOString()
+      }).eq("id", targetId);
+
+      await logAdminAction(userId, "ban_user", { orderId, targetUserId: targetId });
+
+      await bot.sendMessage(targetId, banMessage({ ban_reason: `Banned from order #${orderId}` })).catch(() => {});
+      await bot.sendMessage(userId, `✅ User \`${targetId}\` banned.`, { parse_mode: "Markdown" });
+      return bot.answerCallbackQuery(q.id);
+    }
+
     // ACCEPT / DECLINE TERMS
     if (data === "accept_terms") {
       await supabase.from("users").update({ accepted_terms: true }).eq("id", userId);
@@ -479,13 +686,6 @@ bot.on("callback_query", async (q) => {
     }
     if (data === "decline_terms") {
       await bot.sendMessage(userId, "You need to accept the terms to use Helply. Send /start when you're ready.");
-      return bot.answerCallbackQuery(q.id);
-    }
-
-    // STATS BUTTON (shown after task completion)
-    if (data === "view_stats") {
-      const stats = await computeRunnerStats(userId);
-      await bot.sendMessage(userId, formatRunnerStats(stats), { parse_mode: "Markdown" });
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -592,7 +792,6 @@ bot.on("callback_query", async (q) => {
 
       await supabase.from("offers").delete().eq("id", offerId);
 
-      // Clear both sides so nobody is left in a dead negotiation state.
       clearPendingState(o.user_id);
       clearPendingState(o.runner_id);
 
@@ -678,7 +877,6 @@ bot.on("callback_query", async (q) => {
         }
       );
 
-      // Message each side accurately instead of always blaming the runner.
       await bot.sendMessage(
         order.user_id,
         cancellerIsRunner
@@ -706,8 +904,7 @@ bot.on("callback_query", async (q) => {
 
       await bot.sendMessage(
         order.runner_id,
-        `✅ Task ended successfully\n\n⚠️ For disputes or support:\n\n📧 ${SUPPORT_EMAIL}\n\nRequest ID: ${order.id}`,
-        { reply_markup: { inline_keyboard: [[{ text: "📊 View My Stats", callback_data: "view_stats" }]] } }
+        `✅ Task ended successfully\n\n⚠️ For disputes or support:\n\n📧 ${SUPPORT_EMAIL}\n\nRequest ID: ${order.id}`
       );
       await bot.sendMessage(
         order.user_id,
