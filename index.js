@@ -11,6 +11,17 @@ const app = express();
 app.use(express.json());
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+
+// Native Telegram command menu (the "/" icon next to the message box).
+// Only user-facing commands go here — admin commands stay out of this
+// list since it's visible to every user of the bot, not just admins.
+bot.setMyCommands([
+  { command: "start", description: "Get started / see the main menu" },
+  { command: "help", description: "See what Helply can do" },
+  { command: "becomehelper", description: "Sign up to earn as a Helper" },
+  { command: "stats", description: "See your Helper earnings" },
+  { command: "cancel", description: "Cancel whatever you're doing" }
+]).catch(err => console.log("Could not set command menu:", err.message));
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
@@ -168,6 +179,92 @@ function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString("en-NG")}`;
 }
 
+// ================= STATS / EARNINGS =================
+
+function startOfWeek(date) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0 = Sunday
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+// Pulls every completed task where this user was the runner, plus any
+// currently in-progress (paid, not yet completed) tasks so runners can see
+// money that's "on the way" as well as money already banked.
+async function computeRunnerStats(userId) {
+  const now = new Date();
+  const weekStart = startOfWeek(now);
+  const monthStart = startOfMonth(now);
+
+  const { data: completed, error: completedErr } = await supabase
+    .from("orders")
+    .select("runner_payout, created_at")
+    .eq("runner_id", userId)
+    .eq("status", "completed");
+
+  if (completedErr) console.log("STATS COMPLETED ERROR:", completedErr.message);
+
+  const { data: pending, error: pendingErr } = await supabase
+    .from("orders")
+    .select("runner_payout")
+    .eq("runner_id", userId)
+    .eq("status", "in_progress")
+    .eq("payment_status", "paid");
+
+  if (pendingErr) console.log("STATS PENDING ERROR:", pendingErr.message);
+
+  const rows = completed || [];
+  const pendingRows = pending || [];
+
+  const totalTasks = rows.length;
+  const totalEarned = rows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const weekEarned = rows
+    .filter(r => r.created_at && new Date(r.created_at) >= weekStart)
+    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const monthEarned = rows
+    .filter(r => r.created_at && new Date(r.created_at) >= monthStart)
+    .reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  const avgPerTask = totalTasks > 0 ? Math.round(totalEarned / totalTasks) : 0;
+
+  const pendingCount = pendingRows.length;
+  const pendingEarnings = pendingRows.reduce((sum, r) => sum + Number(r.runner_payout || 0), 0);
+
+  return {
+    totalTasks,
+    totalEarned,
+    weekEarned,
+    monthEarned,
+    avgPerTask,
+    pendingCount,
+    pendingEarnings
+  };
+}
+
+function formatRunnerStats(stats) {
+  let text = `📊 *Your Helper Stats*\n\n`;
+  text += `✅ Tasks completed: *${stats.totalTasks}*\n`;
+  text += `💰 Total earned: *${formatNaira(stats.totalEarned)}*\n`;
+  text += `📈 Avg per task: *${formatNaira(stats.avgPerTask)}*\n\n`;
+  text += `📅 This week: *${formatNaira(stats.weekEarned)}*\n`;
+  text += `🗓️ This month: *${formatNaira(stats.monthEarned)}*\n`;
+
+  if (stats.pendingCount > 0) {
+    text += `\n⏳ Active: *${stats.pendingCount}* task(s) worth *${formatNaira(stats.pendingEarnings)}* once completed`;
+  } else if (stats.totalTasks === 0) {
+    text += `\nNo completed tasks yet — accept a request from the runner group to get started!`;
+  }
+
+  return text;
+}
+
 // ================= ADMIN ACCESS =================
 
 const ADMIN_IDS = new Set(
@@ -176,6 +273,29 @@ const ADMIN_IDS = new Set(
 function isAdmin(userId) {
   return ADMIN_IDS.has(userId);
 }
+
+// ================= MAIN REPLY KEYBOARD =================
+// Persistent buttons pinned under the message box (separate from the
+// inline buttons attached to individual messages elsewhere in the bot).
+// Tapping one just sends its label as plain text — it can't open a URL
+// directly — so the message handler below intercepts these exact labels
+// and routes them to the same logic as their /command equivalents.
+
+const BTN_BECOME_HELPER = "🏃 Become a Helper";
+const BTN_STATS = "📊 My Stats";
+const BTN_HELP = "❓ Help";
+const BTN_CANCEL = "❌ Cancel";
+
+const mainReplyKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [BTN_BECOME_HELPER, BTN_STATS],
+      [BTN_HELP, BTN_CANCEL]
+    ],
+    resize_keyboard: true,
+    is_persistent: true
+  }
+};
 
 // ================= START / CANCEL =================
 
@@ -207,17 +327,17 @@ bot.onText(/\/start/, async (msg) => {
   }
 
   clearPendingState(userId);
-  return bot.sendMessage(userId, "🚀 Welcome back to Helply\n\nSend your request, or become a Helper and start earning.", {
-    reply_markup: {
-      inline_keyboard: [[{ text: "🏃 Become a Helper", url: RUNNER_SIGNUP_FORM_URL }]]
-    }
-  });
+  return bot.sendMessage(
+    userId,
+    "🚀 Welcome back to Helply\n\nSend your request, or use the buttons below anytime.",
+    mainReplyKeyboard
+  );
 });
 
 // Standalone command in case someone wants the signup link without
-// re-reading the whole welcome message.
-bot.onText(/\/becomehelper/, async (msg) => {
-  const userId = msg.from.id.toString();
+// re-reading the whole welcome message. Also triggered by the
+// "🏃 Become a Helper" reply-keyboard button.
+async function sendBecomeHelperMessage(userId) {
   return bot.sendMessage(
     userId,
     "🏃 Want to earn money completing tasks on campus?\n\nFill out the Helper signup form to get started:",
@@ -227,16 +347,65 @@ bot.onText(/\/becomehelper/, async (msg) => {
       }
     }
   );
-});
+}
+bot.onText(/\/becomehelper/, (msg) => sendBecomeHelperMessage(msg.from.id.toString()));
 
-bot.onText(/\/cancel/, async (msg) => {
-  const userId = msg.from.id.toString();
+// Also triggered by the "❌ Cancel" reply-keyboard button.
+async function handleCancelCommand(userId) {
   if (pendingState[userId]) {
     clearPendingState(userId);
     return bot.sendMessage(userId, "✅ Cancelled. Send a new request whenever you're ready.");
   }
   return bot.sendMessage(userId, "Nothing to cancel.");
-});
+}
+bot.onText(/\/cancel/, (msg) => handleCancelCommand(msg.from.id.toString()));
+
+// Also triggered by the "📊 My Stats" reply-keyboard button.
+async function sendStatsMessage(userId) {
+  const user = await getUser(userId);
+  if (!user) {
+    return bot.sendMessage(userId, "⚠️ Send /start first.");
+  }
+
+  try {
+    const stats = await computeRunnerStats(userId);
+    return bot.sendMessage(userId, formatRunnerStats(stats), { parse_mode: "Markdown" });
+  } catch (err) {
+    console.log("STATS ERROR:", err.message);
+    return bot.sendMessage(userId, "❌ Couldn't load your stats right now. Try again shortly.");
+  }
+}
+bot.onText(/\/stats/, (msg) => sendStatsMessage(msg.from.id.toString()));
+
+// Also triggered by the "❓ Help" reply-keyboard button.
+async function sendHelpMessage(userId) {
+  let text = `🤖 *What Helply can do*
+
+*Getting things done*
+Just type what you need (e.g. "pick up my parcel from the gate") — I'll ask for the delivery location and post it to our Helpers.
+
+*Buttons / Commands*
+🏃 Become a Helper — Sign up to earn money completing tasks
+📊 My Stats — See your Helper earnings
+❌ Cancel — Cancel whatever you're currently doing
+/start — Main menu
+/help — This message
+
+Need a hand? 📧 ${SUPPORT_EMAIL}`;
+
+  if (isAdmin(userId)) {
+    text += `\n\n*Admin commands*
+/admin — Full admin command list
+/activeorders — List open, matched, in-progress orders
+/order <id> — View & resolve a specific order
+/ban <userId> [reason]
+/unban <userId>
+/banned — List banned users`;
+  }
+
+  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
+}
+bot.onText(/\/help/, (msg) => sendHelpMessage(msg.from.id.toString()));
 
 // ===== ADMIN: ORDERS & USERS =====
 
@@ -408,6 +577,14 @@ bot.on("message", async (msg) => {
   if (!currentUser.accepted_terms) {
     return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
   }
+
+  // ===== REPLY-KEYBOARD BUTTON TAPS =====
+  // These fire regardless of what the user is mid-way through, so someone
+  // stuck in a weird state can always tap their way back out.
+  if (text === BTN_BECOME_HELPER) return sendBecomeHelperMessage(userId);
+  if (text === BTN_STATS) return sendStatsMessage(userId);
+  if (text === BTN_HELP) return sendHelpMessage(userId);
+  if (text === BTN_CANCEL) return handleCancelCommand(userId);
 
   const state = pendingState[userId];
 
@@ -681,7 +858,7 @@ bot.on("callback_query", async (q) => {
     // ACCEPT / DECLINE TERMS
     if (data === "accept_terms") {
       await supabase.from("users").update({ accepted_terms: true }).eq("id", userId);
-      await bot.sendMessage(userId, "🎉 You're in! Send your request");
+      await bot.sendMessage(userId, "🎉 You're in! Send your request, or use the buttons below anytime.", mainReplyKeyboard);
       return bot.answerCallbackQuery(q.id);
     }
     if (data === "decline_terms") {
