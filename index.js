@@ -1,5 +1,6 @@
 // Required env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, RUNNER_GROUP_ID,
-// BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL
+// BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL,
+// ADMIN_DASHBOARD_USER, ADMIN_DASHBOARD_PASSWORD
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
@@ -265,15 +266,6 @@ function formatRunnerStats(stats) {
   return text;
 }
 
-// ================= ADMIN ACCESS =================
-
-const ADMIN_IDS = new Set(
-  (process.env.ADMIN_IDS || "").split(",").map(s => s.trim()).filter(Boolean)
-);
-function isAdmin(userId) {
-  return ADMIN_IDS.has(userId);
-}
-
 // ================= MAIN REPLY KEYBOARD =================
 // Persistent buttons pinned under the message box (separate from the
 // inline buttons attached to individual messages elsewhere in the bot).
@@ -393,159 +385,9 @@ Just type what you need (e.g. "pick up my parcel from the gate") — I'll ask fo
 
 Need a hand? 📧 ${SUPPORT_EMAIL}`;
 
-  if (isAdmin(userId)) {
-    text += `\n\n*Admin commands*
-/admin — Full admin command list
-/activeorders — List open, matched, in-progress orders
-/order <id> — View & resolve a specific order
-/ban <userId> [reason]
-/unban <userId>
-/banned — List banned users`;
-  }
-
   return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
 }
 bot.onText(/\/help/, (msg) => sendHelpMessage(msg.from.id.toString()));
-
-// ===== ADMIN: ORDERS & USERS =====
-
-bot.onText(/^\/admin$/, async (msg) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const text = `🛠️ *Admin Commands*
-
-*Orders*
-/activeorders — list open, matched, and in-progress orders
-/order <id> — view an order and resolve a dispute
-
-*Users*
-/ban <userId> [reason]
-/unban <userId>
-/banned — list currently banned users`;
-
-  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
-});
-
-bot.onText(/\/activeorders/, async (msg) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const { data: orders, error } = await supabase
-    .from("orders")
-    .select("id, status, user_username, runner_username, total_price")
-    .in("status", ["open", "matched", "in_progress"])
-    .order("id", { ascending: false })
-    .limit(25);
-
-  if (error) {
-    console.log("ACTIVEORDERS ERROR:", error.message);
-    return bot.sendMessage(userId, "❌ Couldn't load orders right now.");
-  }
-
-  if (!orders || orders.length === 0) {
-    return bot.sendMessage(userId, "✅ No active orders right now.");
-  }
-
-  const statusEmoji = { open: "🟡", matched: "🟠", in_progress: "🟢" };
-
-  let text = `📋 *Active Orders* (${orders.length})\n\n`;
-  orders.forEach(o => {
-    text += `${statusEmoji[o.status] || "⚪"} #${o.id} — ${o.status} — @${o.user_username || "?"}`;
-    text += o.runner_username ? ` → @${o.runner_username}` : ` → unassigned`;
-    if (o.total_price) text += ` — ${formatNaira(o.total_price)}`;
-    text += `\n`;
-  });
-  text += `\nUse /order <id> for details or to resolve.`;
-
-  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
-});
-
-bot.onText(/\/order (\d+)/, async (msg, match) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const order = await getOrder(match[1]);
-  if (!order) return bot.sendMessage(userId, "❌ Order not found.");
-
-  const text = `📦 *Order #${order.id}*
-
-Status: *${order.status}* | Payment: *${order.payment_status}*
-
-👤 Requester: @${order.user_username || "unknown"} (\`${order.user_id}\`)
-🏃 Runner: ${order.runner_id ? `@${order.runner_username || "unknown"} (\`${order.runner_id}\`)` : "unassigned"}
-
-📦 Request: ${order.request_text || "—"}
-📍 Location: ${order.delivery_location || "—"}
-
-💰 Agreed price: ${formatNaira(order.agreed_price)}
-💵 Runner payout: ${formatNaira(order.runner_payout)}
-💳 Total charged: ${formatNaira(order.total_price)}`;
-
-  const buttons = [];
-  if (order.status !== "completed") {
-    buttons.push([{ text: "✅ Force complete", callback_data: `admin_complete_${order.id}` }]);
-  }
-  if (order.status === "matched" || order.status === "in_progress") {
-    buttons.push([{ text: "🔄 Reset to open", callback_data: `admin_reset_${order.id}` }]);
-  }
-  if (order.payment_status === "paid") {
-    buttons.push([{ text: "💵 Mark refunded", callback_data: `admin_refund_${order.id}` }]);
-  }
-  buttons.push([{ text: "🗑 Void order", callback_data: `admin_void_${order.id}` }]);
-
-  const userButtons = [{ text: "🚫 Ban requester", callback_data: `adminban_${order.user_id}_${order.id}` }];
-  if (order.runner_id) userButtons.push({ text: "🚫 Ban runner", callback_data: `adminban_${order.runner_id}_${order.id}` });
-  buttons.push(userButtons);
-
-  return bot.sendMessage(userId, text, { parse_mode: "Markdown", reply_markup: { inline_keyboard: buttons } });
-});
-
-bot.onText(/\/ban (\d+)(?:\s+(.+))?/, async (msg, match) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const targetId = match[1];
-  const reason = match[2] || null;
-
-  await supabase.from("users").update({
-    banned: true,
-    ban_reason: reason,
-    banned_at: new Date().toISOString()
-  }).eq("id", targetId);
-
-  await logAdminAction(userId, "ban_user", { targetUserId: targetId, note: reason });
-
-  await bot.sendMessage(targetId, banMessage({ ban_reason: reason })).catch(() => {});
-  return bot.sendMessage(userId, `✅ User \`${targetId}\` banned${reason ? ` — ${reason}` : ""}.`, { parse_mode: "Markdown" });
-});
-
-bot.onText(/\/unban (\d+)/, async (msg, match) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const targetId = match[1];
-  await supabase.from("users").update({ banned: false, ban_reason: null, banned_at: null }).eq("id", targetId);
-  await logAdminAction(userId, "unban_user", { targetUserId: targetId });
-
-  await bot.sendMessage(targetId, "✅ Your Helply account has been reinstated. Send /start to continue.").catch(() => {});
-  return bot.sendMessage(userId, `✅ User \`${targetId}\` unbanned.`, { parse_mode: "Markdown" });
-});
-
-bot.onText(/\/banned/, async (msg) => {
-  const userId = msg.from.id.toString();
-  if (!isAdmin(userId)) return;
-
-  const { data: users } = await supabase.from("users").select("id, username, ban_reason").eq("banned", true);
-  if (!users || users.length === 0) return bot.sendMessage(userId, "✅ No banned users.");
-
-  let text = `🚫 *Banned Users* (${users.length})\n\n`;
-  users.forEach(u => {
-    text += `\`${u.id}\` — @${u.username || "unknown"}${u.ban_reason ? ` — ${u.ban_reason}` : ""}\n`;
-  });
-
-  return bot.sendMessage(userId, text, { parse_mode: "Markdown" });
-});
 
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
@@ -733,126 +575,9 @@ bot.on("callback_query", async (q) => {
 
   try {
     // BAN GATE — a banned user can't do anything else with the bot.
-    if (!isAdmin(userId)) {
-      const requester = await getUser(userId);
-      if (requester?.banned) {
-        return denyCallback(q, "🚫 Your account has been suspended.");
-      }
-    }
-
-    // ===== ADMIN: ORDER RESOLUTION =====
-
-    if (data.startsWith("admin_complete_")) {
-      if (!isAdmin(userId)) return denyCallback(q);
-      const orderId = data.split("_")[2];
-      const order = await getOrder(orderId);
-      if (!order) return denyCallback(q, "❌ Order not found");
-
-      await supabase.from("orders").update({ status: "completed" }).eq("id", Number(orderId));
-      await logAdminAction(userId, "force_complete", { orderId });
-
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
-      }
-      await bot.sendMessage(order.user_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
-
-      await bot.sendMessage(userId, `✅ Order #${order.id} marked completed.`);
-      return bot.answerCallbackQuery(q.id);
-    }
-
-    if (data.startsWith("admin_reset_")) {
-      if (!isAdmin(userId)) return denyCallback(q);
-      const orderId = data.split("_")[2];
-      const order = await getOrder(orderId);
-      if (!order) return denyCallback(q, "❌ Order not found");
-
-      await supabase.from("orders").update({
-        runner_id: null,
-        runner_username: null,
-        agreed_price: null,
-        runner_payout: null,
-        total_price: null,
-        status: "open",
-        payment_status: "pending"
-      }).eq("id", Number(orderId));
-      await supabase.from("offers").delete().eq("order_id", String(orderId));
-      await logAdminAction(userId, "reset_to_open", { orderId });
-
-      await bot.sendMessage(order.user_id, `🔄 Your request #${order.id} was reset by an admin and is open for new offers again.`).catch(() => {});
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id, `🔄 Task #${order.id} was unassigned by an admin.`).catch(() => {});
-      }
-      await bot.sendMessage(
-        RUNNER_GROUP_ID,
-        `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n📌 ${order.delivery_location}`,
-        {
-          message_thread_id: GIGS_TOPIC_ID,
-          reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
-        }
-      );
-
-      await bot.sendMessage(userId, `✅ Order #${order.id} reset to open.`);
-      return bot.answerCallbackQuery(q.id);
-    }
-
-    if (data.startsWith("admin_refund_")) {
-      if (!isAdmin(userId)) return denyCallback(q);
-      const orderId = data.split("_")[2];
-      const order = await getOrder(orderId);
-      if (!order) return denyCallback(q, "❌ Order not found");
-
-      await supabase.from("orders").update({ status: "refunded", payment_status: "refunded" }).eq("id", Number(orderId));
-      await logAdminAction(userId, "mark_refunded", { orderId });
-
-      await bot.sendMessage(order.user_id, `💵 Your payment for task #${order.id} has been marked for refund by an admin. Reach out to ${SUPPORT_EMAIL} with any questions.`).catch(() => {});
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id, `⚠️ Task #${order.id} was cancelled and refunded by an admin.`).catch(() => {});
-      }
-
-      await bot.sendMessage(
-        userId,
-        `⚠️ Order #${order.id} marked refunded in Helply's records.\n\n*This does not trigger an actual Flutterwave refund* — process that manually in your Flutterwave dashboard.`,
-        { parse_mode: "Markdown" }
-      );
-      return bot.answerCallbackQuery(q.id);
-    }
-
-    if (data.startsWith("admin_void_")) {
-      if (!isAdmin(userId)) return denyCallback(q);
-      const orderId = data.split("_")[2];
-      const order = await getOrder(orderId);
-      if (!order) return denyCallback(q, "❌ Order not found");
-
-      await supabase.from("orders").update({ status: "voided" }).eq("id", Number(orderId));
-      await supabase.from("offers").delete().eq("order_id", String(orderId));
-      await logAdminAction(userId, "void_order", { orderId });
-
-      await bot.sendMessage(order.user_id, `🗑 Your request #${order.id} was removed by an admin.\n\nContact ${SUPPORT_EMAIL} if you have questions.`).catch(() => {});
-      if (order.runner_id) {
-        await bot.sendMessage(order.runner_id, `🗑 Task #${order.id} was removed by an admin.`).catch(() => {});
-      }
-
-      await bot.sendMessage(userId, `✅ Order #${order.id} voided.`);
-      return bot.answerCallbackQuery(q.id);
-    }
-
-    if (data.startsWith("adminban_")) {
-      if (!isAdmin(userId)) return denyCallback(q);
-      const parts = data.split("_"); // adminban_<targetId>_<orderId>
-      const targetId = parts[1];
-      const orderId = parts[2];
-
-      await supabase.from("users").update({
-        banned: true,
-        ban_reason: `Banned from order #${orderId}`,
-        banned_at: new Date().toISOString()
-      }).eq("id", targetId);
-
-      await logAdminAction(userId, "ban_user", { orderId, targetUserId: targetId });
-
-      await bot.sendMessage(targetId, banMessage({ ban_reason: `Banned from order #${orderId}` })).catch(() => {});
-      await bot.sendMessage(userId, `✅ User \`${targetId}\` banned.`, { parse_mode: "Markdown" });
-      return bot.answerCallbackQuery(q.id);
+    const requester = await getUser(userId);
+    if (requester?.banned) {
+      return denyCallback(q, "🚫 Your account has been suspended.");
     }
 
     // ACCEPT / DECLINE TERMS
@@ -1144,6 +869,422 @@ app.post("/flutterwave-webhook", async (req, res) => {
   } catch (err) {
     console.log("❌ WEBHOOK ERROR:", err.message);
     return res.sendStatus(500);
+  }
+});
+
+// ================= ADMIN DASHBOARD =================
+
+const DASHBOARD_USER = process.env.ADMIN_DASHBOARD_USER || "admin";
+const DASHBOARD_PASSWORD = process.env.ADMIN_DASHBOARD_PASSWORD;
+
+// Simple HTTP Basic Auth gate for every /admin route. If the password env
+// var isn't set, the dashboard refuses to serve anything rather than
+// silently running unprotected.
+function requireDashboardAuth(req, res, next) {
+  if (!DASHBOARD_PASSWORD) {
+    return res.status(500).send("Dashboard is not configured. Set ADMIN_DASHBOARD_PASSWORD.");
+  }
+
+  const authHeader = req.headers.authorization || "";
+  const [scheme, encoded] = authHeader.split(" ");
+
+  if (scheme === "Basic" && encoded) {
+    const [user, pass] = Buffer.from(encoded, "base64").toString().split(":");
+    if (user === DASHBOARD_USER && pass === DASHBOARD_PASSWORD) {
+      req.dashboardAdmin = user;
+      return next();
+    }
+  }
+
+  res.set("WWW-Authenticate", 'Basic realm="Helply Admin"');
+  return res.status(401).send("Authentication required.");
+}
+
+app.use("/admin", requireDashboardAuth);
+
+const DASHBOARD_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helply Admin</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --border:#262b36; --text:#e8eaed; --muted:#8b93a1;
+          --yellow:#f5c542; --orange:#f59e42; --green:#4ade80; --red:#f87171; --blue:#60a5fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:20px 24px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:18px; margin:0; }
+  main { padding:24px; max-width:1000px; margin:0 auto; }
+  section { margin-bottom:32px; }
+  h2 { font-size:14px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin:0 0 12px; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  th, td { text-align:left; padding:10px 12px; font-size:13px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:600; }
+  tr:last-child td { border-bottom:none; }
+  tr:hover td { background:#1c2028; cursor:pointer; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .badge.open { background:rgba(245,197,66,0.15); color:var(--yellow); }
+  .badge.matched { background:rgba(245,158,66,0.15); color:var(--orange); }
+  .badge.in_progress { background:rgba(74,222,128,0.15); color:var(--green); }
+  .badge.completed { background:rgba(96,165,250,0.15); color:var(--blue); }
+  .badge.voided, .badge.refunded { background:rgba(248,113,113,0.15); color:var(--red); }
+  button { font:inherit; cursor:pointer; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; }
+  .btn-primary { background:var(--blue); color:#0f1115; }
+  .btn-warn { background:var(--orange); color:#0f1115; }
+  .btn-danger { background:var(--red); color:#0f1115; }
+  .btn-ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .btn-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .empty { color:var(--muted); font-size:13px; padding:16px; text-align:center; }
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; padding:20px; }
+  .overlay.show { display:flex; }
+  .modal { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:480px; width:100%; max-height:85vh; overflow-y:auto; }
+  .modal h3 { margin-top:0; }
+  .modal .row { display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid var(--border); }
+  .modal .label { color:var(--muted); }
+  .close-x { float:right; background:none; color:var(--muted); padding:4px 8px; }
+  input[type=text] { width:100%; padding:8px 10px; background:#0f1115; border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; margin-bottom:8px; }
+  .ban-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  .ban-form input { flex:1; min-width:140px; margin-bottom:0; }
+  .toast { position:fixed; bottom:20px; right:20px; background:var(--card); border:1px solid var(--border); padding:12px 16px; border-radius:8px; font-size:13px; display:none; }
+  .toast.show { display:block; }
+  a { color:var(--blue); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛠️ Helply Admin</h1>
+  <button class="btn-ghost" onclick="loadAll()">Refresh</button>
+</header>
+
+<main>
+  <section>
+    <h2>Active Orders</h2>
+    <div id="orders"></div>
+  </section>
+
+  <section>
+    <h2>Banned Users</h2>
+    <div id="banned"></div>
+    <div class="ban-form">
+      <input type="text" id="banUserId" placeholder="Telegram user ID to ban">
+      <input type="text" id="banReason" placeholder="Reason (optional)">
+      <button class="btn-danger" onclick="banUser()">Ban</button>
+    </div>
+  </section>
+</main>
+
+<div class="overlay" id="overlay">
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+  return res.json();
+}
+
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+function naira(n) { return "₦" + Number(n || 0).toLocaleString("en-NG"); }
+
+function closeModal() { document.getElementById("overlay").classList.remove("show"); }
+
+async function loadOrders() {
+  const container = document.getElementById("orders");
+  container.innerHTML = "Loading...";
+  try {
+    const { orders } = await api("/admin/api/orders");
+    if (!orders.length) {
+      container.innerHTML = '<div class="empty">No active orders right now.</div>';
+      return;
+    }
+    let html = "<table><tr><th>ID</th><th>Status</th><th>Requester</th><th>Runner</th><th>Price</th></tr>";
+    orders.forEach(o => {
+      html += "<tr onclick=\"openOrder(" + o.id + ")\">" +
+        "<td>#" + o.id + "</td>" +
+        "<td><span class='badge " + o.status + "'>" + o.status + "</span></td>" +
+        "<td>@" + (o.user_username || "?") + "</td>" +
+        "<td>" + (o.runner_username ? "@" + o.runner_username : "—") + "</td>" +
+        "<td>" + naira(o.total_price) + "</td>" +
+        "</tr>";
+    });
+    html += "</table>";
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = '<div class="empty">Error loading orders: ' + err.message + '</div>';
+  }
+}
+
+async function loadBanned() {
+  const container = document.getElementById("banned");
+  container.innerHTML = "Loading...";
+  try {
+    const { users } = await api("/admin/api/users/banned");
+    if (!users.length) {
+      container.innerHTML = '<div class="empty">No banned users.</div>';
+      return;
+    }
+    let html = "<table><tr><th>User ID</th><th>Username</th><th>Reason</th><th></th></tr>";
+    users.forEach(u => {
+      html += "<tr><td>" + u.id + "</td><td>@" + (u.username || "unknown") + "</td><td>" + (u.ban_reason || "—") + "</td>" +
+        "<td><button class='btn-ghost' onclick=\"unbanUser('" + u.id + "')\">Unban</button></td></tr>";
+    });
+    html += "</table>";
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = '<div class="empty">Error loading banned users: ' + err.message + '</div>';
+  }
+}
+
+async function openOrder(id) {
+  try {
+    const { order } = await api("/admin/api/orders/" + id);
+    const buttons = [];
+    if (order.status !== "completed") buttons.push("<button class='btn-primary' onclick=\"resolveOrder(" + id + ",'complete')\">✅ Force complete</button>");
+    if (order.status === "matched" || order.status === "in_progress") buttons.push("<button class='btn-warn' onclick=\"resolveOrder(" + id + ",'reset')\">🔄 Reset to open</button>");
+    if (order.payment_status === "paid") buttons.push("<button class='btn-warn' onclick=\"resolveOrder(" + id + ",'refund')\">💵 Mark refunded</button>");
+    buttons.push("<button class='btn-danger' onclick=\"resolveOrder(" + id + ",'void')\">🗑 Void</button>");
+    buttons.push("<button class='btn-ghost' onclick=\"banFromOrder('" + order.user_id + "'," + id + ")\">🚫 Ban requester</button>");
+    if (order.runner_id) buttons.push("<button class='btn-ghost' onclick=\"banFromOrder('" + order.runner_id + "'," + id + ")\">🚫 Ban runner</button>");
+
+    document.getElementById("modalBody").innerHTML =
+      "<button class='close-x' onclick='closeModal()'>✕</button>" +
+      "<h3>Order #" + order.id + "</h3>" +
+      "<div class='row'><span class='label'>Status</span><span>" + order.status + " / " + order.payment_status + "</span></div>" +
+      "<div class='row'><span class='label'>Requester</span><span>@" + (order.user_username || "unknown") + " (" + order.user_id + ")</span></div>" +
+      "<div class='row'><span class='label'>Runner</span><span>" + (order.runner_id ? "@" + (order.runner_username || "unknown") + " (" + order.runner_id + ")" : "unassigned") + "</span></div>" +
+      "<div class='row'><span class='label'>Request</span><span>" + (order.request_text || "—") + "</span></div>" +
+      "<div class='row'><span class='label'>Location</span><span>" + (order.delivery_location || "—") + "</span></div>" +
+      "<div class='row'><span class='label'>Agreed price</span><span>" + naira(order.agreed_price) + "</span></div>" +
+      "<div class='row'><span class='label'>Runner payout</span><span>" + naira(order.runner_payout) + "</span></div>" +
+      "<div class='row'><span class='label'>Total charged</span><span>" + naira(order.total_price) + "</span></div>" +
+      "<div class='btn-row'>" + buttons.join("") + "</div>";
+    document.getElementById("overlay").classList.add("show");
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+async function resolveOrder(id, action) {
+  try {
+    await api("/admin/api/orders/" + id + "/" + action, { method: "POST" });
+    toast("Order #" + id + " updated (" + action + ")");
+    closeModal();
+    loadOrders();
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+async function banFromOrder(userId, orderId) {
+  try {
+    await api("/admin/api/users/" + userId + "/ban", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Banned from order #" + orderId })
+    });
+    toast("User " + userId + " banned");
+    closeModal();
+    loadBanned();
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+async function banUser() {
+  const userId = document.getElementById("banUserId").value.trim();
+  const reason = document.getElementById("banReason").value.trim();
+  if (!userId) return toast("Enter a user ID first");
+  try {
+    await api("/admin/api/users/" + userId + "/ban", {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || null })
+    });
+    toast("User " + userId + " banned");
+    document.getElementById("banUserId").value = "";
+    document.getElementById("banReason").value = "";
+    loadBanned();
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+async function unbanUser(userId) {
+  try {
+    await api("/admin/api/users/" + userId + "/unban", { method: "POST" });
+    toast("User " + userId + " unbanned");
+    loadBanned();
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+function loadAll() { loadOrders(); loadBanned(); }
+loadAll();
+</script>
+</body>
+</html>`;
+
+app.get("/admin", (req, res) => res.send(DASHBOARD_HTML));
+
+app.get("/admin/api/orders", async (req, res) => {
+  const { data: orders, error } = await supabase
+    .from("orders")
+    .select("id, status, payment_status, user_username, runner_username, total_price")
+    .in("status", ["open", "matched", "in_progress"])
+    .order("id", { ascending: false })
+    .limit(50);
+
+  if (error) return res.status(500).json({ error: error.message });
+  return res.json({ orders: orders || [] });
+});
+
+app.get("/admin/api/orders/:id", async (req, res) => {
+  const order = await getOrder(req.params.id);
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  return res.json({ order });
+});
+
+app.post("/admin/api/orders/:id/complete", async (req, res) => {
+  try {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    await supabase.from("orders").update({ status: "completed" }).eq("id", Number(order.id));
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "force_complete", { orderId: order.id });
+
+    if (order.runner_id) {
+      await bot.sendMessage(order.runner_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
+    }
+    await bot.sendMessage(order.user_id, `✅ Task #${order.id} was marked completed by an admin.\n\n📧 ${SUPPORT_EMAIL}`).catch(() => {});
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/orders/:id/reset", async (req, res) => {
+  try {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    await supabase.from("orders").update({
+      runner_id: null,
+      runner_username: null,
+      agreed_price: null,
+      runner_payout: null,
+      total_price: null,
+      status: "open",
+      payment_status: "pending"
+    }).eq("id", Number(order.id));
+    await supabase.from("offers").delete().eq("order_id", String(order.id));
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "reset_to_open", { orderId: order.id });
+
+    await bot.sendMessage(order.user_id, `🔄 Your request #${order.id} was reset by an admin and is open for new offers again.`).catch(() => {});
+    if (order.runner_id) {
+      await bot.sendMessage(order.runner_id, `🔄 Task #${order.id} was unassigned by an admin.`).catch(() => {});
+    }
+    await bot.sendMessage(
+      RUNNER_GROUP_ID,
+      `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n📌 ${order.delivery_location}`,
+      {
+        message_thread_id: GIGS_TOPIC_ID,
+        reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
+      }
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/orders/:id/refund", async (req, res) => {
+  try {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    await supabase.from("orders").update({ status: "refunded", payment_status: "refunded" }).eq("id", Number(order.id));
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "mark_refunded", { orderId: order.id });
+
+    await bot.sendMessage(order.user_id, `💵 Your payment for task #${order.id} has been marked for refund by an admin. Reach out to ${SUPPORT_EMAIL} with any questions.`).catch(() => {});
+    if (order.runner_id) {
+      await bot.sendMessage(order.runner_id, `⚠️ Task #${order.id} was cancelled and refunded by an admin.`).catch(() => {});
+    }
+
+    return res.json({ ok: true, note: "Records updated only — process the real refund in Flutterwave." });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/orders/:id/void", async (req, res) => {
+  try {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+
+    await supabase.from("orders").update({ status: "voided" }).eq("id", Number(order.id));
+    await supabase.from("offers").delete().eq("order_id", String(order.id));
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "void_order", { orderId: order.id });
+
+    await bot.sendMessage(order.user_id, `🗑 Your request #${order.id} was removed by an admin.\n\nContact ${SUPPORT_EMAIL} if you have questions.`).catch(() => {});
+    if (order.runner_id) {
+      await bot.sendMessage(order.runner_id, `🗑 Task #${order.id} was removed by an admin.`).catch(() => {});
+    }
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/users/banned", async (req, res) => {
+  const { data: users, error } = await supabase.from("users").select("id, username, ban_reason").eq("banned", true);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.json({ users: users || [] });
+});
+
+app.post("/admin/api/users/:id/ban", async (req, res) => {
+  try {
+    const targetId = req.params.id;
+    const reason = (req.body && req.body.reason) || null;
+
+    await supabase.from("users").update({
+      banned: true,
+      ban_reason: reason,
+      banned_at: new Date().toISOString()
+    }).eq("id", targetId);
+
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "ban_user", { targetUserId: targetId, note: reason });
+    await bot.sendMessage(targetId, banMessage({ ban_reason: reason })).catch(() => {});
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/users/:id/unban", async (req, res) => {
+  try {
+    const targetId = req.params.id;
+
+    await supabase.from("users").update({ banned: false, ban_reason: null, banned_at: null }).eq("id", targetId);
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "unban_user", { targetUserId: targetId });
+    await bot.sendMessage(targetId, "✅ Your Helply account has been reinstated. Send /start to continue.").catch(() => {});
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
