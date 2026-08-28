@@ -79,12 +79,16 @@ function clearPendingState(userId) {
 
 // ================= HELPERS =================
 
+// A user is only "busy" (blocked from taking/posting a new task) once a
+// task has actually been paid for and isn't completed yet. A "matched"
+// order (accepted but unpaid) does NOT block — either side can still
+// cancel it and move on freely before money changes hands.
 async function isBusy(userId) {
   const { data } = await supabase
     .from("orders")
     .select("id, status")
     .or(`user_id.eq.${userId},runner_id.eq.${userId}`)
-    .in("status", ["matched", "in_progress"]);
+    .in("status", ["in_progress"]);
   return !!(data && data.length > 0);
 }
 
@@ -574,7 +578,8 @@ bot.on("message", async (msg) => {
 
     await bot.sendMessage(
       userId,
-      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}`
+      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}`,
+      { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]] } }
     );
 
     await bot.sendMessage(
@@ -706,6 +711,7 @@ bot.on("callback_query", async (q) => {
 
       const { data: offers } = await supabase.from("offers").select("*").eq("order_id", String(taskId));
       const buttons = offers.map(o => [{ text: `${o.runner_name} - ₦${o.current_price}`, callback_data: `view_${o.id}` }]);
+      buttons.push([{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]);
 
       await bot.sendMessage(order.user_id, "💰 Offers:", { reply_markup: { inline_keyboard: buttons } });
       await bot.sendMessage(
@@ -806,12 +812,41 @@ bot.on("callback_query", async (q) => {
         "📦 Task assigned\n\n⏳ Waiting for user payment...",
         { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]] } }
       );
-      await bot.sendMessage(o.user_id, `💳 Pay ₦${userPrice}\n\n${link}`);
+      await bot.sendMessage(
+        o.user_id,
+        `💳 Pay ₦${userPrice}\n\n${link}`,
+        { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]] } }
+      );
 
       return bot.answerCallbackQuery(q.id);
     }
 
-    // CANCEL TASK
+    // CANCEL AN OPEN REQUEST (before any offer is accepted)
+    if (data.startsWith("cancelreq_")) {
+      const orderId = data.split("_")[1];
+      const order = await getOrder(orderId);
+      if (!order) return denyCallback(q, "❌ Request not found");
+      if (order.user_id !== userId) return denyCallback(q);
+
+      if (order.status !== "open") {
+        return denyCallback(q, "❌ This request already has a Helper assigned — use the Cancel Task button on that message instead.");
+      }
+
+      const { data: pendingOffers } = await supabase.from("offers").select("*").eq("order_id", String(orderId));
+      await supabase.from("offers").delete().eq("order_id", String(orderId));
+      await supabase.from("orders").update({ status: "cancelled" }).eq("id", Number(orderId));
+
+      clearPendingState(userId);
+
+      for (const o of (pendingOffers || [])) {
+        await bot.sendMessage(o.runner_id, `❌ The requester cancelled request #${orderId}. Your offer is no longer needed.`).catch(() => {});
+      }
+
+      await bot.sendMessage(userId, `✅ Request #${orderId} cancelled.`);
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // CANCEL TASK (matched, unpaid)
     if (data.startsWith("cancel_")) {
       const id = data.split("_")[1];
       const order = await getOrder(id);
@@ -824,38 +859,41 @@ bot.on("callback_query", async (q) => {
 
       const cancellerIsRunner = order.runner_id === userId;
 
-      await supabase.from("orders").update({
-        runner_id: null,
-        runner_username: null,
-        agreed_price: null,
-        runner_payout: null,
-        total_price: null,
-        status: "open",
-        payment_status: "pending"
-      }).eq("id", Number(id));
-
       await supabase.from("offers").delete().eq("order_id", String(id));
 
-      await bot.sendMessage(
-        RUNNER_GROUP_ID,
-        `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n📌 ${order.delivery_location}`,
-        {
-          message_thread_id: GIGS_TOPIC_ID,
-          reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
-        }
-      );
+      if (cancellerIsRunner) {
+        // Runner backed out — the requester's request deserves another shot,
+        // so reset to open and repost for other Helpers to pick up.
+        await supabase.from("orders").update({
+          runner_id: null,
+          runner_username: null,
+          agreed_price: null,
+          runner_payout: null,
+          total_price: null,
+          status: "open",
+          payment_status: "pending"
+        }).eq("id", Number(id));
 
-      await bot.sendMessage(
-        order.user_id,
-        cancellerIsRunner
-          ? "⚠️ Your Helper cancelled the task.\n\nYour request has been reposted."
-          : "❌ You cancelled the task."
-      );
-      if (order.runner_id) {
         await bot.sendMessage(
-          order.runner_id,
-          cancellerIsRunner ? "❌ You cancelled the task." : "❌ The user cancelled the task."
+          RUNNER_GROUP_ID,
+          `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n📌 ${order.delivery_location}`,
+          {
+            message_thread_id: GIGS_TOPIC_ID,
+            reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
+          }
         );
+
+        await bot.sendMessage(order.user_id, "⚠️ Your Helper cancelled the task.\n\nYour request has been reposted.");
+        await bot.sendMessage(order.runner_id, "❌ You cancelled the task.");
+      } else {
+        // Requester cancelled — they don't want this fulfilled at all,
+        // so void it entirely instead of reposting.
+        await supabase.from("orders").update({ status: "cancelled" }).eq("id", Number(id));
+
+        await bot.sendMessage(order.user_id, "✅ You cancelled the task.");
+        if (order.runner_id) {
+          await bot.sendMessage(order.runner_id, "❌ The requester cancelled this task.").catch(() => {});
+        }
       }
 
       return bot.answerCallbackQuery(q.id);
