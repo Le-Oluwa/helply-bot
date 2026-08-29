@@ -32,6 +32,21 @@ const MIN_PRICE = 50;
 const SUPPORT_EMAIL = "helply.cu@gmail.com";
 const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
 
+// Printing category: the printer is contacted directly via their own
+// Telegram chat, and the printing cost is auto-calculated (not negotiated)
+// so it can be added on top of the runner's negotiated delivery fee.
+const PRINTER_CHAT_ID = process.env.PRINTER_CHAT_ID;
+const PRICE_PER_PAGE_BW = Number(process.env.PRICE_PER_PAGE_BW || 20);
+const PRICE_PER_PAGE_COLOR = Number(process.env.PRICE_PER_PAGE_COLOR || 100);
+const BINDING_FEE = Number(process.env.BINDING_FEE || 200);
+
+function computePrintCost(pages, color, binding) {
+  const perPage = color === "color" ? PRICE_PER_PAGE_COLOR : PRICE_PER_PAGE_BW;
+  let cost = perPage * Number(pages || 0);
+  if (binding) cost += BINDING_FEE;
+  return cost;
+}
+
 const TERMS_TEXT = `📜 *Helply Terms & Conditions*
 
 *Account Use*
@@ -150,6 +165,73 @@ async function generateUniqueTaskId() {
     if (!data) return candidate;
   }
   throw new Error("Could not generate a unique task ID after 5 attempts");
+}
+
+// Called once the user uploads the document/photo — the last step of the
+// printing flow. Creates the order, posts the pickup job to the runner
+// group (with delivery location), and forwards the actual file straight
+// to the printer's Telegram chat (without the delivery location, since
+// the printer doesn't need it).
+async function finalizePrintingOrder(msg, userId, printData) {
+  let taskId;
+  try {
+    taskId = await generateUniqueTaskId();
+  } catch (e) {
+    clearPendingState(userId);
+    return bot.sendMessage(userId, "❌ Something went wrong creating your print request. Please try again.");
+  }
+
+  const printCost = computePrintCost(printData.pages, printData.color, printData.binding);
+  const colorLabel = printData.color === "color" ? "Color" : "Black & White";
+
+  const requestText = `[Printing] ${printData.pages} page(s), ${colorLabel}, ${printData.paper}` +
+    `${printData.binding ? ", Binding" : ""}${printData.note ? ` — Note: ${printData.note}` : ""}`;
+
+  // Store the file reference now — it's sent to the printer later, only
+  // once the user has actually paid (see the Flutterwave webhook).
+  const printFileId = msg.document ? msg.document.file_id : msg.photo[msg.photo.length - 1].file_id;
+  const printFileType = msg.document ? "document" : "photo";
+
+  const { error } = await supabase.from("orders").insert([{
+    id: taskId,
+    user_id: userId,
+    user_username: msg.from.username || "",
+    request_text: requestText,
+    delivery_location: printData.location,
+    status: "open",
+    payment_status: "pending",
+    category: "Printing",
+    print_color: printData.color,
+    print_paper: printData.paper,
+    print_pages: printData.pages,
+    print_binding: !!printData.binding,
+    print_note: printData.note || null,
+    print_cost: printCost,
+    print_file_id: printFileId,
+    print_file_type: printFileType
+  }]);
+
+  clearPendingState(userId);
+
+  if (error) {
+    console.log("PRINT ORDER INSERT ERROR:", error.message);
+    return bot.sendMessage(userId, "❌ Something went wrong creating your print request. Please try again.");
+  }
+
+  await bot.sendMessage(
+    userId,
+    `✅ Print request sent!\n\n🆔 Request ID: ${taskId}\n\n📦 ${requestText}\n\n📍 Delivery:\n${printData.location}\n\n🖨️ Printing cost: ${formatNaira(printCost)} (added to your total once a Helper is matched)\n\n⏳ Please wait while we match you with a Helper...`,
+    { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]] } }
+  );
+
+  await bot.sendMessage(
+    RUNNER_GROUP_ID,
+    `🚨 PRINTING PICKUP NEEDED\n\n🆔 ${taskId}\n\n📦 ${requestText}\n\n📍 Delivery:\n${printData.location}`,
+    {
+      message_thread_id: GIGS_TOPIC_ID,
+      reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${taskId}` }]] }
+    }
+  );
 }
 
 async function denyCallback(q, text = "❌ You can't do that") {
@@ -426,11 +508,9 @@ bot.onText(/\/help/, (msg) => sendHelpMessage(msg.from.id.toString()));
 
 // ================= MESSAGE =================
 bot.on("message", async (msg) => {
-  if (!msg.text || msg.text.startsWith("/")) return;
   if (msg.chat.type !== "private") return;
 
   const userId = msg.from.id.toString();
-  const text = msg.text.trim();
 
   let { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
   let currentUser = user;
@@ -455,6 +535,25 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
   }
 
+  const state = pendingState[userId];
+
+  // ===== PRINTING: DOCUMENT/PHOTO UPLOAD =====
+  // These messages have no msg.text at all, so they must be caught here,
+  // before the text-only bail-out below would otherwise ignore them.
+  if (state?.mode === "print_upload_wait") {
+    if (msg.document || msg.photo) {
+      return finalizePrintingOrder(msg, userId, state.printData);
+    }
+    if (msg.text) {
+      return bot.sendMessage(userId, "📎 Please send the document as a file or photo (not text).");
+    }
+    return;
+  }
+
+  if (!msg.text || msg.text.startsWith("/")) return;
+
+  const text = msg.text.trim();
+
   // ===== REPLY-KEYBOARD BUTTON TAPS =====
   // These fire regardless of what the user is mid-way through, so someone
   // stuck in a weird state can always tap their way back out.
@@ -463,7 +562,45 @@ bot.on("message", async (msg) => {
   if (text === BTN_STATS) return sendStatsMessage(userId);
   if (text === BTN_HELP) return sendHelpMessage(userId);
 
-  const state = pendingState[userId];
+  // ===== PRINTING: PAPER TYPE =====
+  if (state?.mode === "print_paper") {
+    const printData = { ...state.printData, paper: text };
+    pendingState[userId] = { mode: "print_pages", printData };
+    return bot.sendMessage(userId, "📄 How many pages?");
+  }
+
+  // ===== PRINTING: PAGE COUNT =====
+  if (state?.mode === "print_pages") {
+    const pages = parseInt(text, 10);
+    if (isNaN(pages) || pages <= 0) {
+      return bot.sendMessage(userId, "❌ Enter a valid number of pages (e.g. 10).");
+    }
+    const printData = { ...state.printData, pages };
+    pendingState[userId] = { mode: "print_binding_wait", printData };
+    return bot.sendMessage(userId, "📎 Does it need binding?", {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "✅ Yes", callback_data: "printbinding_yes" },
+          { text: "❌ No", callback_data: "printbinding_no" }
+        ]]
+      }
+    });
+  }
+
+  // ===== PRINTING: SPECIAL NOTE =====
+  if (state?.mode === "print_note") {
+    const note = text.toLowerCase() === "none" ? null : text;
+    const printData = { ...state.printData, note };
+    pendingState[userId] = { mode: "print_delivery_location", printData };
+    return bot.sendMessage(userId, "📍 Enter your delivery location:");
+  }
+
+  // ===== PRINTING: DELIVERY LOCATION =====
+  if (state?.mode === "print_delivery_location") {
+    const printData = { ...state.printData, location: text };
+    pendingState[userId] = { mode: "print_upload_wait", printData };
+    return bot.sendMessage(userId, "📎 Now send the document you'd like printed — as a file or a photo.");
+  }
 
   // ===== USER TYPING DETAILS AFTER PICKING A SERVICE CATEGORY =====
   // Funnels straight into the existing "location" step below — no new
@@ -571,11 +708,42 @@ bot.on("callback_query", async (q) => {
         return bot.answerCallbackQuery(q.id);
       }
 
+      if (key === "printing") {
+        pendingState[userId] = { mode: "print_awaiting_color", printData: {} };
+        await bot.sendMessage(userId, "🖨️ Printing request\n\nFirst, black & white or color?", {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: "⚫ Black & White", callback_data: "printcolor_bw" },
+              { text: "🎨 Color", callback_data: "printcolor_color" }
+            ]]
+          }
+        });
+        return bot.answerCallbackQuery(q.id);
+      }
+
       const category = SERVICE_CATEGORIES[key];
       if (!category) return denyCallback(q, "❌ Unknown service category");
 
       pendingState[userId] = { mode: "category_detail", category };
       await bot.sendMessage(userId, `📝 Tell me what you need for ${category} (e.g. "pick up rice from Mama's kitchen"):`);
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // PRINTING: COLOR CHOICE
+    if (data.startsWith("printcolor_")) {
+      const color = data.split("_")[1]; // "bw" or "color"
+      const printData = { ...(pendingState[userId]?.printData || {}), color };
+      pendingState[userId] = { mode: "print_paper", printData };
+      await bot.sendMessage(userId, "📄 What type of paper? (e.g. A4, Foolscap, Glossy)");
+      return bot.answerCallbackQuery(q.id);
+    }
+
+    // PRINTING: BINDING CHOICE
+    if (data.startsWith("printbinding_")) {
+      const choice = data.split("_")[1]; // "yes" or "no"
+      const printData = { ...(pendingState[userId]?.printData || {}), binding: choice === "yes" };
+      pendingState[userId] = { mode: "print_note", printData };
+      await bot.sendMessage(userId, "📝 Any special note? (or type \"none\")");
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -751,7 +919,8 @@ bot.on("callback_query", async (q) => {
 
       const runnerFee = Number(o.current_price);
       const runnerPayout = Math.round(runnerFee * 0.9);
-      const userPrice = Math.round(runnerFee * 1.3);
+      const printCost = Number(order.print_cost || 0);
+      const userPrice = Math.round(runnerFee * 1.3) + printCost;
 
       await supabase.from("orders").update({
         runner_id: o.runner_id,
@@ -769,6 +938,7 @@ bot.on("callback_query", async (q) => {
       clearPendingState(o.runner_id);
 
       const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
+      const priceBreakdown = printCost > 0 ? ` (includes ${formatNaira(printCost)} printing cost)` : "";
 
       await bot.sendMessage(
         o.runner_id,
@@ -777,7 +947,7 @@ bot.on("callback_query", async (q) => {
       );
       await bot.sendMessage(
         o.user_id,
-        `💳 Pay ₦${userPrice}\n\n${link}`,
+        `💳 Pay ₦${userPrice}${priceBreakdown}\n\n${link}`,
         { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]] } }
       );
 
@@ -932,6 +1102,29 @@ app.post("/flutterwave-webhook", async (req, res) => {
         "✅ Payment confirmed!\n\n🤝 You can now chat with your Helper — just type any message here and it'll be sent to them.",
         { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
       );
+
+      // Printing orders: now that payment is confirmed, forward the actual
+      // document/photo to the printer — never before this point. The
+      // delivery location is deliberately left out (that went to the
+      // runner group instead, not the printer).
+      if (order.category === "Printing" && order.print_file_id) {
+        if (!PRINTER_CHAT_ID) {
+          console.log("PRINTER_CHAT_ID not set — skipped printer notification for order", orderId);
+        } else {
+          const colorLabel = order.print_color === "color" ? "Color" : "Black & White";
+          const printerCaption = `🖨️ Paid print job #${orderId}\n\n${order.print_pages} page(s)\n${colorLabel}\nPaper: ${order.print_paper}\nBinding: ${order.print_binding ? "Yes" : "No"}${order.print_note ? `\nNote: ${order.print_note}` : ""}`;
+
+          try {
+            if (order.print_file_type === "document") {
+              await bot.sendDocument(PRINTER_CHAT_ID, order.print_file_id, { caption: printerCaption });
+            } else {
+              await bot.sendPhoto(PRINTER_CHAT_ID, order.print_file_id, { caption: printerCaption });
+            }
+          } catch (err) {
+            console.log("PRINTER NOTIFY ERROR:", err.message);
+          }
+        }
+      }
 
       console.log("✅ WEBHOOK ORDER UPDATED:", orderId);
     }
