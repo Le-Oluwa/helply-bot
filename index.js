@@ -21,8 +21,7 @@ bot.setMyCommands([
   { command: "help", description: "See what Helply can do" },
   { command: "services", description: "Browse Food Runs, Laundry, Printing, Errands" },
   { command: "becomehelper", description: "Sign up to earn as a Helper" },
-  { command: "stats", description: "See your Helper earnings" },
-  { command: "cancel", description: "Cancel whatever you're doing" }
+  { command: "stats", description: "See your Helper earnings" }
 ]).catch(err => console.log("Could not set command menu:", err.message));
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -157,21 +156,28 @@ async function denyCallback(q, text = "❌ You can't do that") {
   return bot.answerCallbackQuery(q.id, { text, show_alert: true });
 }
 
-async function sendOfferAdjuster(chatId, taskId, price, editMessageId) {
-  const text = `💰 Set your offer ₦${price}`;
+// Generalized button-based price picker. Used for all three price-entry
+// points (new offer, user counter, runner counter) so nobody ever has to
+// type a number — "kind" + "refId" together identify what happens on
+// submit: kind "new" -> refId is a taskId (creates a fresh offer),
+// kind "ucounter"/"rcounter" -> refId is an offerId (updates that offer).
+const DEFAULT_OFFER_START = 200;
+
+async function sendPriceAdjuster(chatId, price, kind, refId, editMessageId) {
+  const text = `💰 Set the offer amount: ₦${price}`;
   const keyboard = {
     inline_keyboard: [
       [
-        { text: "-1000", callback_data: `adj_${taskId}_${price}_-1000` },
-        { text: "-500", callback_data: `adj_${taskId}_${price}_-500` },
-        { text: "-50", callback_data: `adj_${taskId}_${price}_-50` }
+        { text: "-1000", callback_data: `padj_${kind}_${refId}_${price}_-1000` },
+        { text: "-500", callback_data: `padj_${kind}_${refId}_${price}_-500` },
+        { text: "-50", callback_data: `padj_${kind}_${refId}_${price}_-50` }
       ],
       [
-        { text: "+50", callback_data: `adj_${taskId}_${price}_50` },
-        { text: "+500", callback_data: `adj_${taskId}_${price}_500` },
-        { text: "+1000", callback_data: `adj_${taskId}_${price}_1000` }
+        { text: "+50", callback_data: `padj_${kind}_${refId}_${price}_50` },
+        { text: "+500", callback_data: `padj_${kind}_${refId}_${price}_500` },
+        { text: "+1000", callback_data: `padj_${kind}_${refId}_${price}_1000` }
       ],
-      [{ text: "✅ Submit Offer", callback_data: `submit_${taskId}_${price}` }]
+      [{ text: "✅ Submit", callback_data: `psub_${kind}_${refId}_${price}` }]
     ]
   };
 
@@ -282,14 +288,13 @@ const BTN_SERVICES = "📋 Our Services";
 const BTN_BECOME_HELPER = "🏃 Become a Helper";
 const BTN_STATS = "📊 My Stats";
 const BTN_HELP = "❓ Help";
-const BTN_CANCEL = "❌ Cancel";
 
 const mainReplyKeyboard = {
   reply_markup: {
     keyboard: [
       [BTN_SERVICES],
       [BTN_BECOME_HELPER, BTN_STATS],
-      [BTN_HELP, BTN_CANCEL]
+      [BTN_HELP]
     ],
     resize_keyboard: true,
     is_persistent: true
@@ -379,16 +384,6 @@ async function sendBecomeHelperMessage(userId) {
 }
 bot.onText(/\/becomehelper/, (msg) => sendBecomeHelperMessage(msg.from.id.toString()));
 
-// Also triggered by the "❌ Cancel" reply-keyboard button.
-async function handleCancelCommand(userId) {
-  if (pendingState[userId]) {
-    clearPendingState(userId);
-    return bot.sendMessage(userId, "✅ Cancelled. Send a new request whenever you're ready.");
-  }
-  return bot.sendMessage(userId, "Nothing to cancel.");
-}
-bot.onText(/\/cancel/, (msg) => handleCancelCommand(msg.from.id.toString()));
-
 // Also triggered by the "📊 My Stats" reply-keyboard button.
 async function sendStatsMessage(userId) {
   const user = await getUser(userId);
@@ -420,7 +415,6 @@ Tap 📋 Our Services to pick a category (Food Runs, Laundry, Printing, Errands)
 📋 Our Services — Browse what Helply can help with
 🏃 Become a Helper — Sign up to earn money completing tasks
 📊 My Stats — See your Helper earnings
-❌ Cancel — Cancel whatever you're currently doing
 /start — Main menu
 /help — This message
 
@@ -468,74 +462,8 @@ bot.on("message", async (msg) => {
   if (text === BTN_BECOME_HELPER) return sendBecomeHelperMessage(userId);
   if (text === BTN_STATS) return sendStatsMessage(userId);
   if (text === BTN_HELP) return sendHelpMessage(userId);
-  if (text === BTN_CANCEL) return handleCancelCommand(userId);
 
   const state = pendingState[userId];
-
-  // ===== USER COUNTER =====
-  if (state?.mode === "counter") {
-    const counterPrice = Number(text);
-    if (isNaN(counterPrice) || counterPrice < MIN_PRICE) {
-      return bot.sendMessage(userId, `❌ Enter a valid amount (minimum ₦${MIN_PRICE}), or /cancel`);
-    }
-
-    const offer = await getOffer(state.offerId);
-    if (!offer) {
-      clearPendingState(userId);
-      return bot.sendMessage(userId, "❌ This offer no longer exists.");
-    }
-
-    await supabase.from("offers").update({ current_price: counterPrice }).eq("id", state.offerId);
-    clearPendingState(userId);
-
-    await bot.sendMessage(
-      offer.runner_id,
-      `💬 User countered your offer\n\n💰 New price: ₦${counterPrice}`,
-      offerButtons(state.offerId, true)
-    );
-    return;
-  }
-
-  // ===== RUNNER COUNTER =====
-  if (state?.mode === "runner_counter") {
-    const newPrice = Number(text);
-    if (isNaN(newPrice) || newPrice < MIN_PRICE) {
-      return bot.sendMessage(userId, `❌ Enter a valid amount (minimum ₦${MIN_PRICE}), or /cancel`);
-    }
-
-    const offer = await getOffer(state.offerId);
-    if (!offer) {
-      clearPendingState(userId);
-      return bot.sendMessage(userId, "❌ This offer no longer exists.");
-    }
-
-    await supabase.from("offers").update({ current_price: newPrice }).eq("id", state.offerId);
-    clearPendingState(userId);
-
-    await bot.sendMessage(
-      offer.user_id,
-      `💬 Runner updated the offer\n\n💰 New price: ₦${newPrice}`,
-      offerButtons(state.offerId, false)
-    );
-    return;
-  }
-
-  // ===== RUNNER TYPING A STARTING OFFER AMOUNT =====
-  if (state?.mode === "offer_amount") {
-    const price = Number(text);
-    if (isNaN(price) || price < MIN_PRICE) {
-      return bot.sendMessage(userId, `❌ Enter a valid amount (minimum ₦${MIN_PRICE}), or /cancel`);
-    }
-
-    const order = await getOrder(state.taskId);
-    if (!order || order.status !== "open") {
-      clearPendingState(userId);
-      return bot.sendMessage(userId, "❌ This request is no longer available.");
-    }
-
-    clearPendingState(userId);
-    return sendOfferAdjuster(userId, state.taskId, price);
-  }
 
   // ===== USER TYPING DETAILS AFTER PICKING A SERVICE CATEGORY =====
   // Funnels straight into the existing "location" step below — no new
@@ -578,7 +506,7 @@ bot.on("message", async (msg) => {
 
     await bot.sendMessage(
       userId,
-      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}`,
+      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}\n\n⏳ Please wait while we match you with a Helper...`,
       { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]] } }
     );
 
@@ -675,51 +603,88 @@ bot.on("callback_query", async (q) => {
       if (order.status !== "open") return denyCallback(q, "❌ This request is no longer available");
       if (order.user_id === userId) return denyCallback(q, "❌ You can't offer on your own request");
 
-      pendingState[userId] = { mode: "offer_amount", taskId };
-      await bot.sendMessage(userId, `💰 Enter your offer amount for request #${taskId}:`);
+      await sendPriceAdjuster(userId, DEFAULT_OFFER_START, "new", taskId);
       return bot.answerCallbackQuery(q.id);
     }
 
-    // ADJUST OFFER PRICE
-    if (data.startsWith("adj_")) {
-      const [, taskId, currentPriceStr, changeStr] = data.split("_");
+    // ADJUST PRICE (shared by new offers, user counters, runner counters)
+    if (data.startsWith("padj_")) {
+      const [, kind, refId, currentPriceStr, changeStr] = data.split("_");
       let newPrice = Number(currentPriceStr) + Number(changeStr);
       if (newPrice < MIN_PRICE) newPrice = MIN_PRICE;
 
-      await sendOfferAdjuster(q.message.chat.id, taskId, newPrice, q.message.message_id);
+      await sendPriceAdjuster(q.message.chat.id, newPrice, kind, refId, q.message.message_id);
       return bot.answerCallbackQuery(q.id);
     }
 
-    // SUBMIT OFFER
-    if (data.startsWith("submit_")) {
-      const [, taskId, price] = data.split("_");
+    // SUBMIT PRICE (shared by new offers, user counters, runner counters)
+    if (data.startsWith("psub_")) {
+      const [, kind, refId, priceStr] = data.split("_");
+      const price = Number(priceStr);
 
-      const order = await getOrder(taskId);
-      if (!order) return denyCallback(q, "❌ Request not found");
-      if (order.status !== "open") return denyCallback(q, "❌ This request is no longer available");
+      if (kind === "new") {
+        const taskId = refId;
+        const order = await getOrder(taskId);
+        if (!order) return denyCallback(q, "❌ Request not found");
+        if (order.status !== "open") return denyCallback(q, "❌ This request is no longer available");
 
-      const offerId = uuidv4();
-      await supabase.from("offers").insert([{
-        id: offerId,
-        order_id: String(taskId),
-        user_id: order.user_id,
-        runner_id: userId,
-        runner_name: q.from.first_name,
-        runner_username: q.from.username || "",
-        current_price: Number(price)
-      }]);
+        const offerId = uuidv4();
+        await supabase.from("offers").insert([{
+          id: offerId,
+          order_id: String(taskId),
+          user_id: order.user_id,
+          runner_id: userId,
+          runner_name: q.from.first_name,
+          runner_username: q.from.username || "",
+          current_price: price
+        }]);
 
-      const { data: offers } = await supabase.from("offers").select("*").eq("order_id", String(taskId));
-      const buttons = offers.map(o => [{ text: `${o.runner_name} - ₦${o.current_price}`, callback_data: `view_${o.id}` }]);
-      buttons.push([{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]);
+        const { data: offers } = await supabase.from("offers").select("*").eq("order_id", String(taskId));
+        const buttons = offers.map(o => [{ text: `${o.runner_name} - ₦${o.current_price}`, callback_data: `view_${o.id}` }]);
+        buttons.push([{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]);
 
-      await bot.sendMessage(order.user_id, "💰 Offers:", { reply_markup: { inline_keyboard: buttons } });
-      await bot.sendMessage(
-        userId,
-        `⏳ Offer submitted successfully\n\n💰 Your Offer: ₦${price}\n\nWaiting for the user to accept, counter, or reject your offer.`
-      );
+        await bot.sendMessage(order.user_id, "💰 Offers:", { reply_markup: { inline_keyboard: buttons } });
+        await bot.sendMessage(
+          userId,
+          `⏳ Offer submitted successfully\n\n💰 Your Offer: ₦${price}\n\nWaiting for the user to accept, counter, or reject your offer.`
+        );
 
-      return bot.answerCallbackQuery(q.id);
+        return bot.answerCallbackQuery(q.id);
+      }
+
+      if (kind === "ucounter") {
+        const offerId = refId;
+        const offer = await getOffer(offerId);
+        if (!offer) return denyCallback(q, "❌ Offer not found");
+        if (offer.user_id !== userId) return denyCallback(q);
+
+        await supabase.from("offers").update({ current_price: price }).eq("id", offerId);
+
+        await bot.sendMessage(
+          offer.runner_id,
+          `💬 User countered your offer\n\n💰 New price: ₦${price}`,
+          offerButtons(offerId, true)
+        );
+        return bot.answerCallbackQuery(q.id);
+      }
+
+      if (kind === "rcounter") {
+        const offerId = refId;
+        const offer = await getOffer(offerId);
+        if (!offer) return denyCallback(q, "❌ Offer not found");
+        if (offer.runner_id !== userId) return denyCallback(q);
+
+        await supabase.from("offers").update({ current_price: price }).eq("id", offerId);
+
+        await bot.sendMessage(
+          offer.user_id,
+          `💬 Runner updated the offer\n\n💰 New price: ₦${price}`,
+          offerButtons(offerId, false)
+        );
+        return bot.answerCallbackQuery(q.id);
+      }
+
+      return denyCallback(q, "❌ Unknown price action");
     }
 
     // VIEW OFFER
@@ -740,8 +705,7 @@ bot.on("callback_query", async (q) => {
       if (!o) return denyCallback(q, "❌ Offer not found");
       if (o.user_id !== userId) return denyCallback(q);
 
-      pendingState[userId] = { mode: "counter", offerId };
-      await bot.sendMessage(userId, "💬 Enter your counter offer amount:");
+      await sendPriceAdjuster(userId, Number(o.current_price), "ucounter", offerId);
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -752,8 +716,7 @@ bot.on("callback_query", async (q) => {
       if (!o) return denyCallback(q, "❌ Offer not found");
       if (o.runner_id !== userId) return denyCallback(q);
 
-      pendingState[userId] = { mode: "runner_counter", offerId };
-      await bot.sendMessage(userId, "💬 Enter your new offer amount:");
+      await sendPriceAdjuster(userId, Number(o.current_price), "rcounter", offerId);
       return bot.answerCallbackQuery(q.id);
     }
 
@@ -961,10 +924,14 @@ app.post("/flutterwave-webhook", async (req, res) => {
 
       await bot.sendMessage(
         order.runner_id,
-        "💰 Payment received!\n\n📦 Task is now active.",
+        "💰 Payment received!\n\n📦 Task is now active.\n\n💬 You can now chat with the user — just type any message here and it'll be sent to them.",
         { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
       );
-      await bot.sendMessage(order.user_id, "✅ Payment confirmed!\n\n🤝 You can now chat with your Helper.");
+      await bot.sendMessage(
+        order.user_id,
+        "✅ Payment confirmed!\n\n🤝 You can now chat with your Helper — just type any message here and it'll be sent to them.",
+        { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
+      );
 
       console.log("✅ WEBHOOK ORDER UPDATED:", orderId);
     }
