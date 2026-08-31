@@ -11,6 +11,11 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 
+// Used by the "/" sanity route below so you can confirm, after a deploy,
+// that the server you're hitting actually restarted with the new code
+// (compare this timestamp / commit to what you just pushed).
+const BOOT_TIME = new Date().toISOString();
+
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
 // Native Telegram command menu (the "/" icon next to the message box).
@@ -1152,6 +1157,19 @@ bot.on("callback_query", async (q) => {
   }
 });
 
+// ================= DEPLOY SANITY CHECK =================
+// Hit this with a browser after every deploy to confirm the running
+// process actually picked up your latest push — compares boot time /
+// commit against what you just pushed. No auth required (nothing
+// sensitive here).
+app.get("/", (req, res) => {
+  res.send(
+    `Helply server is running.<br>` +
+    `Commit: ${process.env.RAILWAY_GIT_COMMIT_SHA || "unknown"}<br>` +
+    `Boot time: ${BOOT_TIME}`
+  );
+});
+
 // ================= PAYMENT SUCCESS =================
 app.get("/payment-success", async (req, res) => {
   return res.send(`
@@ -1643,6 +1661,7 @@ app.post("/admin/api/users/:id/unban", async (req, res) => {
 });
 
 // ================= SERVER =================
-app.listen(3000, () => {
-  console.log("🌐 Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🌐 Server running on port ${PORT}`);
 });
