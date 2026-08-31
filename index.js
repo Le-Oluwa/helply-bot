@@ -1,5 +1,5 @@
 // Required env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, RUNNER_GROUP_ID,
-// BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL,
+// BASE_URL, PAYMENT_BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL,
 // ADMIN_DASHBOARD_USER, ADMIN_DASHBOARD_PASSWORD
 
 require("dotenv").config();
@@ -28,6 +28,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const RUNNER_GROUP_ID = process.env.RUNNER_GROUP_ID;
 const GIGS_TOPIC_ID = 2;
 const BASE_URL = process.env.BASE_URL;
+// The bot's own domain (used for /admin) is NOT the same server as the
+// payment service that handles /create-payment — that's a separate
+// deployment with its own URL.
+const PAYMENT_BASE_URL = process.env.PAYMENT_BASE_URL;
 const MIN_PRICE = 50;
 const SUPPORT_EMAIL = "helply.cu@gmail.com";
 const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
@@ -937,7 +941,7 @@ bot.on("callback_query", async (q) => {
       clearPendingState(o.user_id);
       clearPendingState(o.runner_id);
 
-      const link = `${BASE_URL}/create-payment?orderId=${o.order_id}`;
+      const link = `${PAYMENT_BASE_URL}/create-payment?orderId=${o.order_id}`;
       const priceBreakdown = printCost > 0 ? ` (includes ${formatNaira(printCost)} printing cost)` : "";
 
       await bot.sendMessage(
