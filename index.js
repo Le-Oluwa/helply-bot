@@ -11,12 +11,14 @@ const express = require("express");
 const app = express();
 app.use(express.json());
 
-// Used by the "/" sanity route below so you can confirm, after a deploy,
-// that the server you're hitting actually restarted with the new code
-// (compare this timestamp / commit to what you just pushed).
-const BOOT_TIME = new Date().toISOString();
-
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+
+// Cached so /invite can build a t.me deep link without an extra API call
+// every time someone asks for their referral link.
+let BOT_USERNAME = null;
+bot.getMe()
+  .then(me => { BOT_USERNAME = me.username; })
+  .catch(err => console.log("Could not fetch bot username:", err.message));
 
 // Native Telegram command menu (the "/" icon next to the message box).
 // Only user-facing commands go here — admin commands stay out of this
@@ -26,7 +28,8 @@ bot.setMyCommands([
   { command: "help", description: "See what Helply can do" },
   { command: "services", description: "Browse Food Runs, Laundry, Printing, Errands" },
   { command: "becomehelper", description: "Sign up to earn as a Helper" },
-  { command: "stats", description: "See your Helper earnings" }
+  { command: "stats", description: "See your Helper earnings" },
+  { command: "invite", description: "Invite friends and earn rewards" }
 ]).catch(err => console.log("Could not set command menu:", err.message));
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -153,6 +156,133 @@ async function logAdminAction(adminId, action, { orderId, targetUserId, note } =
 
 function banMessage(user) {
   return `🚫 Your Helply account has been suspended.${user?.ban_reason ? `\n\nReason: ${user.ban_reason}` : ""}\n\nContact ${SUPPORT_EMAIL} if you think this is a mistake.`;
+}
+
+// ================= REFERRAL / REWARD SYSTEM =================
+// Reward rules live in app_settings (editable from the admin dashboard),
+// not hardcoded, so amounts and mode can change without a redeploy.
+
+const DEFAULT_REWARD_SETTINGS = {
+  mode: "first_transaction",     // "first_transaction" | "recurring"
+  firstRewardAmount: 500,
+  recurringRewardAmount: 100,
+  recurringLimit: null           // null = unlimited
+};
+
+async function getRewardSettings() {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("*")
+    .in("key", [
+      "referral_reward_mode",
+      "referral_first_reward_amount",
+      "referral_recurring_reward_amount",
+      "referral_recurring_limit"
+    ]);
+
+  const map = {};
+  (data || []).forEach(row => { map[row.key] = row.value; });
+
+  return {
+    mode: map.referral_reward_mode || DEFAULT_REWARD_SETTINGS.mode,
+    firstRewardAmount: map.referral_first_reward_amount != null && map.referral_first_reward_amount !== ""
+      ? Number(map.referral_first_reward_amount) : DEFAULT_REWARD_SETTINGS.firstRewardAmount,
+    recurringRewardAmount: map.referral_recurring_reward_amount != null && map.referral_recurring_reward_amount !== ""
+      ? Number(map.referral_recurring_reward_amount) : DEFAULT_REWARD_SETTINGS.recurringRewardAmount,
+    recurringLimit: map.referral_recurring_limit ? Number(map.referral_recurring_limit) : null
+  };
+}
+
+async function setRewardSetting(key, value) {
+  return supabase.from("app_settings").upsert({
+    key,
+    value: String(value),
+    updated_at: new Date().toISOString()
+  });
+}
+
+async function generateUniqueReferralCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous chars (0/O, 1/I)
+  for (let attempt = 0; attempt < 5; attempt++) {
+    let code = "";
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    const { data } = await supabase.from("users").select("id").eq("referral_code", code).maybeSingle();
+    if (!data) return code;
+  }
+  throw new Error("Could not generate a unique referral code after 5 attempts");
+}
+
+// Pays out a referral reward and logs it. The unique (referral_id, order_id)
+// constraint on referral_rewards means this is safe even if called twice
+// for the same order (e.g. a webhook retry) — the second insert just fails
+// quietly and no double payout happens.
+async function payoutReferralReward(referral, orderId, amount, reasonLabel) {
+  if (!amount || amount <= 0) return;
+
+  const { error: logError } = await supabase.from("referral_rewards").insert([{
+    referral_id: referral.id,
+    order_id: String(orderId),
+    reward_amount: amount
+  }]);
+
+  if (logError) return; // most likely a race — someone else already logged this reward
+
+  const { data: referrer } = await supabase
+    .from("users")
+    .select("wallet_balance")
+    .eq("id", referral.referrer_id)
+    .maybeSingle();
+
+  const newBalance = Number(referrer?.wallet_balance || 0) + Number(amount);
+  await supabase.from("users").update({ wallet_balance: newBalance }).eq("id", referral.referrer_id);
+
+  await bot.sendMessage(
+    referral.referrer_id,
+    `🎉 Referral bonus!\n\n${reasonLabel} by someone you invited.\n\n💰 ${formatNaira(amount)} added to your Helply wallet.\n\nNew balance: ${formatNaira(newBalance)}\n\nUse /invite to see your referral stats.`
+  ).catch(() => {});
+}
+
+// Call this after a referred user's order becomes "real" — paid (as
+// requester) or completed (as runner). Safe to call on every such event;
+// it figures out on its own whether a reward is actually owed right now.
+async function rewardReferralIfEligible(userId, orderId) {
+  try {
+    const { data: referral } = await supabase
+      .from("referrals")
+      .select("*")
+      .eq("referred_id", userId)
+      .maybeSingle();
+
+    if (!referral) return; // this user wasn't referred by anyone
+
+    const settings = await getRewardSettings();
+
+    if (settings.mode === "first_transaction") {
+      const { data: priorRewards } = await supabase
+        .from("referral_rewards")
+        .select("id")
+        .eq("referral_id", referral.id)
+        .limit(1);
+
+      if (priorRewards && priorRewards.length > 0) return; // already rewarded once
+      await payoutReferralReward(referral, orderId, settings.firstRewardAmount, "First task completed");
+      return;
+    }
+
+    if (settings.mode === "recurring") {
+      if (settings.recurringLimit !== null) {
+        const { count } = await supabase
+          .from("referral_rewards")
+          .select("id", { count: "exact", head: true })
+          .eq("referral_id", referral.id);
+
+        if ((count || 0) >= settings.recurringLimit) return; // cap reached
+      }
+      await payoutReferralReward(referral, orderId, settings.recurringRewardAmount, "Task completed");
+    }
+  } catch (err) {
+    console.log("REFERRAL REWARD ERROR:", err.message);
+  }
 }
 
 function offerButtons(offerId, forRunner) {
@@ -443,6 +573,7 @@ function formatRunnerStats(stats) {
 const BTN_SERVICES = "📋 Our Services";
 const BTN_BECOME_HELPER = "🏃 Become a Helper";
 const BTN_STATS = "📊 My Stats";
+const BTN_INVITE = "🎁 Invite & Earn";
 const BTN_HELP = "❓ Help";
 
 const mainReplyKeyboard = {
@@ -450,7 +581,7 @@ const mainReplyKeyboard = {
     keyboard: [
       [BTN_SERVICES],
       [BTN_BECOME_HELPER, BTN_STATS],
-      [BTN_HELP]
+      [BTN_INVITE, BTN_HELP]
     ],
     resize_keyboard: true,
     is_persistent: true
@@ -489,14 +620,44 @@ async function sendServicesMenu(userId) {
 
 // ================= START / CANCEL =================
 
-bot.onText(/\/start/, async (msg) => {
+bot.onText(/\/start(?:\s+(.+))?/, async (msg, match) => {
   const userId = msg.from.id.toString();
   const username = msg.from.username || "";
+  const payload = match && match[1] ? match[1].trim() : null;
 
   let { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
 
   if (!user) {
-    await supabase.from("users").insert([{ id: userId, username, accepted_terms: false, banned: false }]);
+    const referralCode = await generateUniqueReferralCode();
+    let referredBy = null;
+
+    if (payload && payload.toLowerCase().startsWith("ref_")) {
+      const refCode = payload.slice(4);
+      const { data: referrer } = await supabase
+        .from("users")
+        .select("id")
+        .eq("referral_code", refCode)
+        .maybeSingle();
+
+      if (referrer && referrer.id !== userId) {
+        referredBy = referrer.id;
+      }
+    }
+
+    await supabase.from("users").insert([{
+      id: userId,
+      username,
+      accepted_terms: false,
+      banned: false,
+      referral_code: referralCode,
+      referred_by: referredBy,
+      wallet_balance: 0
+    }]);
+
+    if (referredBy) {
+      await supabase.from("referrals").insert([{ referrer_id: referredBy, referred_id: userId }]);
+    }
+
     user = { id: userId, accepted_terms: false };
   }
 
@@ -557,6 +718,66 @@ async function sendStatsMessage(userId) {
 }
 bot.onText(/\/stats/, (msg) => sendStatsMessage(msg.from.id.toString()));
 
+// Also triggered by the "🎁 Invite & Earn" reply-keyboard button.
+async function sendInviteMessage(userId) {
+  let user = await getUser(userId);
+  if (!user) return bot.sendMessage(userId, "⚠️ Send /start first.");
+
+  if (!user.referral_code) {
+    const code = await generateUniqueReferralCode();
+    await supabase.from("users").update({ referral_code: code }).eq("id", userId);
+    user.referral_code = code;
+  }
+
+  const botUsername = BOT_USERNAME || (await bot.getMe()).username;
+  const link = `https://t.me/${botUsername}?start=ref_${user.referral_code}`;
+
+  const { data: referrals } = await supabase.from("referrals").select("id").eq("referrer_id", userId);
+  const referralIds = (referrals || []).map(r => r.id);
+
+  let rewardedCount = 0;
+  let totalEarnedFromReferrals = 0;
+  if (referralIds.length > 0) {
+    const { data: rewards } = await supabase
+      .from("referral_rewards")
+      .select("referral_id, reward_amount")
+      .in("referral_id", referralIds);
+
+    const rewardRows = rewards || [];
+    rewardedCount = new Set(rewardRows.map(r => r.referral_id)).size;
+    totalEarnedFromReferrals = rewardRows.reduce((sum, r) => sum + Number(r.reward_amount || 0), 0);
+  }
+
+  const settings = await getRewardSettings();
+  const rewardExplainer = settings.mode === "first_transaction"
+    ? `Invite friends — when someone you invite completes their first task, you get ${formatNaira(settings.firstRewardAmount)} in your wallet.`
+    : `Invite friends — you earn ${formatNaira(settings.recurringRewardAmount)} every time someone you invited completes a task${settings.recurringLimit ? ` (up to ${settings.recurringLimit} tasks per person)` : ""}.`;
+
+  const text = `🎁 *Invite & Earn*
+
+${rewardExplainer}
+
+🔗 Your link:
+${link}
+
+👥 Invited: *${referralIds.length}*
+✅ Earned from: *${rewardedCount}* friend(s)
+💰 Total earned from referrals: *${formatNaira(totalEarnedFromReferrals)}*
+💳 Wallet balance: *${formatNaira(user.wallet_balance)}*
+
+Your wallet balance is automatically applied as a discount the next time you pay for a task.`;
+
+  return bot.sendMessage(userId, text, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "📤 Share invite link", url: `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Join me on Helply — get things done on campus 🚀")}` }
+      ]]
+    }
+  });
+}
+bot.onText(/\/invite/, (msg) => sendInviteMessage(msg.from.id.toString()));
+
 // Also triggered by the "📋 Our Services" reply-keyboard button.
 bot.onText(/\/services/, (msg) => sendServicesMenu(msg.from.id.toString()));
 
@@ -571,6 +792,7 @@ Tap 📋 Our Services to pick a category (Food Runs, Laundry, Printing, Errands)
 📋 Our Services — Browse what Helply can help with
 🏃 Become a Helper — Sign up to earn money completing tasks
 📊 My Stats — See your Helper earnings
+🎁 Invite & Earn — Get rewarded for inviting friends
 /start — Main menu
 /help — This message
 
@@ -590,9 +812,10 @@ bot.on("message", async (msg) => {
   let currentUser = user;
 
   if (!currentUser) {
+    const referralCode = await generateUniqueReferralCode();
     const { error } = await supabase
       .from("users")
-      .insert([{ id: userId, username: msg.from.username || "", accepted_terms: true }]);
+      .insert([{ id: userId, username: msg.from.username || "", accepted_terms: true, referral_code: referralCode }]);
 
     if (error) {
       console.log("INSERT ERROR:", error.message);
@@ -647,6 +870,7 @@ bot.on("message", async (msg) => {
   if (text === BTN_SERVICES) return sendServicesMenu(userId);
   if (text === BTN_BECOME_HELPER) return sendBecomeHelperMessage(userId);
   if (text === BTN_STATS) return sendStatsMessage(userId);
+  if (text === BTN_INVITE) return sendInviteMessage(userId);
   if (text === BTN_HELP) return sendHelpMessage(userId);
 
   // ===== PRINTING: PAPER TYPE =====
@@ -1015,7 +1239,19 @@ bot.on("callback_query", async (q) => {
       const runnerFee = Number(o.current_price);
       const runnerPayout = Math.round(runnerFee * 0.9);
       const printCost = Number(order.print_cost || 0);
-      const userPrice = Math.round(runnerFee * 1.3) + printCost;
+      let userPrice = Math.round(runnerFee * 1.3) + printCost;
+
+      // Auto-apply any wallet credit the payer has earned (e.g. from
+      // referrals), capped so the final price never drops below MIN_PRICE.
+      const { data: payer } = await supabase.from("users").select("wallet_balance").eq("id", o.user_id).maybeSingle();
+      const walletBalance = Number(payer?.wallet_balance || 0);
+      const maxDiscount = Math.max(userPrice - MIN_PRICE, 0);
+      const discount = Math.min(walletBalance, maxDiscount);
+      userPrice = userPrice - discount;
+
+      if (discount > 0) {
+        await supabase.from("users").update({ wallet_balance: walletBalance - discount }).eq("id", o.user_id);
+      }
 
       await supabase.from("orders").update({
         runner_id: o.runner_id,
@@ -1033,7 +1269,8 @@ bot.on("callback_query", async (q) => {
       clearPendingState(o.runner_id);
 
       const link = `${PAYMENT_BASE_URL}/create-payment?orderId=${o.order_id}`;
-      const priceBreakdown = printCost > 0 ? ` (includes ${formatNaira(printCost)} printing cost)` : "";
+      const printBreakdown = printCost > 0 ? `\n🖨️ Includes ${formatNaira(printCost)} printing cost` : "";
+      const discountBreakdown = discount > 0 ? `\n🎁 ${formatNaira(discount)} wallet credit applied` : "";
 
       await bot.sendMessage(
         o.runner_id,
@@ -1042,7 +1279,7 @@ bot.on("callback_query", async (q) => {
       );
       await bot.sendMessage(
         o.user_id,
-        `💳 Pay ₦${userPrice}${priceBreakdown}\n\n${link}`,
+        `💳 Pay ₦${userPrice}${printBreakdown}${discountBreakdown}\n\n${link}`,
         { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Task", callback_data: `cancel_${o.order_id}` }]] } }
       );
 
@@ -1136,6 +1373,10 @@ bot.on("callback_query", async (q) => {
 
       await supabase.from("orders").update({ status: "completed" }).eq("id", Number(id));
 
+      // Runner just completed (possibly) their first task — check if this
+      // triggers a referral reward for whoever invited them.
+      await rewardReferralIfEligible(order.runner_id, order.id);
+
       await bot.sendMessage(
         order.runner_id,
         `✅ Task ended successfully\n\n⚠️ For disputes or support:\n\n📧 ${SUPPORT_EMAIL}\n\nRequest ID: ${order.id}`
@@ -1155,19 +1396,6 @@ bot.on("callback_query", async (q) => {
       // callback query may already be too old to answer; nothing more to do
     }
   }
-});
-
-// ================= DEPLOY SANITY CHECK =================
-// Hit this with a browser after every deploy to confirm the running
-// process actually picked up your latest push — compares boot time /
-// commit against what you just pushed. No auth required (nothing
-// sensitive here).
-app.get("/", (req, res) => {
-  res.send(
-    `Helply server is running.<br>` +
-    `Commit: ${process.env.RAILWAY_GIT_COMMIT_SHA || "unknown"}<br>` +
-    `Boot time: ${BOOT_TIME}`
-  );
 });
 
 // ================= PAYMENT SUCCESS =================
@@ -1199,6 +1427,10 @@ app.post("/flutterwave-webhook", async (req, res) => {
       if (order.payment_status === "paid") return res.sendStatus(200);
 
       await supabase.from("orders").update({ payment_status: "paid", status: "in_progress" }).eq("id", orderId);
+
+      // Requester just paid for (possibly) their first task — check if
+      // this triggers a referral reward for whoever invited them.
+      await rewardReferralIfEligible(order.user_id, orderId);
 
       await bot.sendMessage(
         order.runner_id,
@@ -1344,6 +1576,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       <input type="text" id="banReason" placeholder="Reason (optional)">
       <button class="btn-danger" onclick="banUser()">Ban</button>
     </div>
+  </section>
+
+  <section>
+    <h2>Referral Rewards</h2>
+    <div id="rewardSettingsForm">Loading...</div>
   </section>
 </main>
 
@@ -1500,7 +1737,44 @@ async function unbanUser(userId) {
   }
 }
 
-function loadAll() { loadOrders(); loadBanned(); }
+async function loadRewardSettings() {
+  const container = document.getElementById("rewardSettingsForm");
+  container.innerHTML = "Loading...";
+  try {
+    const { settings } = await api("/admin/api/settings");
+    container.innerHTML =
+      "<div class='row'><span class='label'>Mode</span><span>" +
+      "<select id='rewardMode'>" +
+      "<option value='first_transaction'" + (settings.mode === "first_transaction" ? " selected" : "") + ">One-time (first task)</option>" +
+      "<option value='recurring'" + (settings.mode === "recurring" ? " selected" : "") + ">Recurring (every task)</option>" +
+      "</select></span></div>" +
+      "<div class='row'><span class='label'>First-task reward (\u20a6)</span><span><input type='text' id='firstReward' value='" + settings.firstRewardAmount + "'></span></div>" +
+      "<div class='row'><span class='label'>Recurring reward (\u20a6/task)</span><span><input type='text' id='recurringReward' value='" + settings.recurringRewardAmount + "'></span></div>" +
+      "<div class='row'><span class='label'>Recurring limit (blank = unlimited)</span><span><input type='text' id='recurringLimit' value='" + (settings.recurringLimit === null ? "" : settings.recurringLimit) + "'></span></div>" +
+      "<div class='btn-row'><button class='btn-primary' onclick='saveRewardSettings()'>Save</button></div>";
+  } catch (err) {
+    container.innerHTML = '<div class="empty">Error loading settings: ' + err.message + '</div>';
+  }
+}
+
+async function saveRewardSettings() {
+  try {
+    await api("/admin/api/settings", {
+      method: "POST",
+      body: JSON.stringify({
+        mode: document.getElementById("rewardMode").value,
+        firstRewardAmount: document.getElementById("firstReward").value,
+        recurringRewardAmount: document.getElementById("recurringReward").value,
+        recurringLimit: document.getElementById("recurringLimit").value
+      })
+    });
+    toast("Referral settings saved");
+  } catch (err) {
+    toast("Error: " + err.message);
+  }
+}
+
+function loadAll() { loadOrders(); loadBanned(); loadRewardSettings(); }
 loadAll();
 </script>
 </body>
@@ -1626,6 +1900,38 @@ app.get("/admin/api/users/banned", async (req, res) => {
   return res.json({ users: users || [] });
 });
 
+app.get("/admin/api/settings", async (req, res) => {
+  try {
+    const settings = await getRewardSettings();
+    return res.json({ settings });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/settings", async (req, res) => {
+  try {
+    const { mode, firstRewardAmount, recurringRewardAmount, recurringLimit } = req.body || {};
+
+    if (mode !== "first_transaction" && mode !== "recurring") {
+      return res.status(400).json({ error: "Invalid mode" });
+    }
+
+    await setRewardSetting("referral_reward_mode", mode);
+    await setRewardSetting("referral_first_reward_amount", Number(firstRewardAmount) || 0);
+    await setRewardSetting("referral_recurring_reward_amount", Number(recurringRewardAmount) || 0);
+    await setRewardSetting("referral_recurring_limit", recurringLimit === "" || recurringLimit == null ? "" : Number(recurringLimit));
+
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "update_reward_settings", {
+      note: `mode=${mode}, first=${firstRewardAmount}, recurring=${recurringRewardAmount}, limit=${recurringLimit || "unlimited"}`
+    });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/admin/api/users/:id/ban", async (req, res) => {
   try {
     const targetId = req.params.id;
@@ -1661,7 +1967,6 @@ app.post("/admin/api/users/:id/unban", async (req, res) => {
 });
 
 // ================= SERVER =================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
+app.listen(3000, () => {
+  console.log("🌐 Server running on port 3000");
 });
