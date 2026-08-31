@@ -238,6 +238,71 @@ async function finalizePrintingOrder(msg, userId, printData) {
   );
 }
 
+// Called once the user sends a photo of their laundry — the last step of
+// the laundry flow. Creates the order exactly like a normal request, but
+// posts the runner-group message as a photo (with the details as a
+// caption) instead of plain text. Everything after this point (offers,
+// negotiation, payment) is identical to any other order.
+async function finalizeLaundryOrder(msg, userId, state) {
+  const { requestText, locationText } = state;
+
+  let taskId;
+  try {
+    taskId = await generateUniqueTaskId();
+  } catch (e) {
+    clearPendingState(userId);
+    return bot.sendMessage(userId, "❌ Something went wrong creating your request. Please try again.");
+  }
+
+  const { error } = await supabase.from("orders").insert([{
+    id: taskId,
+    user_id: userId,
+    user_username: msg.from.username || "",
+    request_text: requestText,
+    delivery_location: locationText,
+    status: "open",
+    payment_status: "pending",
+    category: "Laundry"
+  }]);
+
+  clearPendingState(userId);
+
+  if (error) {
+    console.log("LAUNDRY ORDER INSERT ERROR:", error.message);
+    return bot.sendMessage(userId, "❌ Something went wrong creating your request. Please try again.");
+  }
+
+  await bot.sendMessage(
+    userId,
+    `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}\n\n⏳ Please wait while we match you with a Helper...`,
+    { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]] } }
+  );
+
+  const caption = `🚨 NEW REQUEST\n\n🆔 ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}`;
+  const groupOptions = {
+    caption,
+    message_thread_id: GIGS_TOPIC_ID,
+    reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${taskId}` }]] }
+  };
+
+  try {
+    if (msg.photo) {
+      const largest = msg.photo[msg.photo.length - 1];
+      await bot.sendPhoto(RUNNER_GROUP_ID, largest.file_id, groupOptions);
+    } else {
+      await bot.sendDocument(RUNNER_GROUP_ID, msg.document.file_id, groupOptions);
+    }
+  } catch (err) {
+    console.log("LAUNDRY RUNNER GROUP POST ERROR:", err.message);
+    // Fall back to a plain text post so the request isn't lost even if the
+    // photo somehow fails to send.
+    await bot.sendMessage(RUNNER_GROUP_ID, caption, {
+      message_thread_id: GIGS_TOPIC_ID,
+      reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${taskId}` }]] }
+    });
+  }
+}
+
 async function denyCallback(q, text = "❌ You can't do that") {
   return bot.answerCallbackQuery(q.id, { text, show_alert: true });
 }
@@ -495,7 +560,7 @@ async function sendHelpMessage(userId) {
   let text = `🤖 *What Helply can do*
 
 *Getting things done*
-Tap 📋 Our Services to pick a category (Food Runs, Laundry, Printing, Errands), or just type what you need (e.g. "pick up my parcel from the gate") — I'll ask for the delivery location and post it to our Helpers.
+Tap 📋 Our Services to pick a category (Food Runs, Laundry, Printing, Errands), or just type what you need (e.g. "pick up my parcel from the gate") — I'll ask where to meet you or drop it off, then post it to our Helpers.
 
 *Buttons / Commands*
 📋 Our Services — Browse what Helply can help with
@@ -554,6 +619,19 @@ bot.on("message", async (msg) => {
     return;
   }
 
+  // ===== LAUNDRY: PHOTO OF ITEMS =====
+  // Also has no msg.text — must be caught here before the text-only
+  // bail-out below.
+  if (state?.mode === "laundry_photo_wait") {
+    if (msg.document || msg.photo) {
+      return finalizeLaundryOrder(msg, userId, state);
+    }
+    if (msg.text) {
+      return bot.sendMessage(userId, "📸 Please send a photo of your laundry (not text).");
+    }
+    return;
+  }
+
   if (!msg.text || msg.text.startsWith("/")) return;
 
   const text = msg.text.trim();
@@ -596,7 +674,7 @@ bot.on("message", async (msg) => {
     const note = text.toLowerCase() === "none" ? null : text;
     const printData = { ...state.printData, note };
     pendingState[userId] = { mode: "print_delivery_location", printData };
-    return bot.sendMessage(userId, "📍 Enter your delivery location:");
+    return bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
   }
 
   // ===== PRINTING: DELIVERY LOCATION =====
@@ -611,14 +689,22 @@ bot.on("message", async (msg) => {
   // order-creation logic, just a friendlier on-ramp into the same flow.
   if (state?.mode === "category_detail") {
     const requestText = state.category ? `[${state.category}] ${text}` : text;
-    pendingState[userId] = { mode: "location", request: requestText };
-    return bot.sendMessage(userId, "📍 Enter your delivery location:");
+    pendingState[userId] = { mode: "location", request: requestText, category: state.category };
+    return bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
   }
 
   // ===== LOCATION STEP =====
   if (state?.mode === "location") {
     const requestText = state.request;
     const locationText = text;
+
+    // Laundry needs a photo of the items before the order is posted —
+    // hold everything gathered so far and wait for that photo instead of
+    // finalizing right away.
+    if (state.category === "Laundry") {
+      pendingState[userId] = { mode: "laundry_photo_wait", requestText, locationText };
+      return bot.sendMessage(userId, "📸 Please send a photo of what you'd like washed.");
+    }
 
     let taskId;
     try {
@@ -686,7 +772,7 @@ bot.on("message", async (msg) => {
   }
 
   pendingState[userId] = { mode: "location", request: text };
-  await bot.sendMessage(userId, "📍 Enter your delivery location:");
+  await bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
 });
 
 // ================= CALLBACK =================
