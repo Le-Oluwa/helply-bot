@@ -1364,7 +1364,7 @@ async function loadOrders() {
     }
     let html = "<table><tr><th>ID</th><th>Status</th><th>Requester</th><th>Runner</th><th>Price</th></tr>";
     orders.forEach(o => {
-      html += "<tr onclick=\"openOrder(" + o.id + ")\">" +
+  html += "<tr data-id='" + o.id + "' onclick='openOrder(this.dataset.id)'>" +
         "<td>#" + o.id + "</td>" +
         "<td><span class='badge " + o.status + "'>" + o.status + "</span></td>" +
         "<td>@" + (o.user_username || "?") + "</td>" +
@@ -1401,6 +1401,7 @@ async function loadBanned() {
 }
 
 async function openOrder(id) {
+ id = Number(id);
   try {
     const { order } = await api("/admin/api/orders/" + id);
     const buttons = [];
@@ -1408,7 +1409,7 @@ async function openOrder(id) {
     if (order.status === "matched" || order.status === "in_progress") buttons.push("<button class='btn-warn' onclick=\"resolveOrder(" + id + ",'reset')\">🔄 Reset to open</button>");
     if (order.payment_status === "paid") buttons.push("<button class='btn-warn' onclick=\"resolveOrder(" + id + ",'refund')\">💵 Mark refunded</button>");
     buttons.push("<button class='btn-danger' onclick=\"resolveOrder(" + id + ",'void')\">🗑 Void</button>");
-    buttons.push("<button class='btn-ghost' onclick=\"banFromOrder('" + order.user_id + "'," + id + ")\">🚫 Ban requester</button>");
+   "<button class='btn-ghost' onclick='banFromOrder(\"" + order.user_id + "\"," + id + ")'>🚫 Ban requester</button>"
     if (order.runner_id) buttons.push("<button class='btn-ghost' onclick=\"banFromOrder('" + order.runner_id + "'," + id + ")\">🚫 Ban runner</button>");
 
     document.getElementById("modalBody").innerHTML =
