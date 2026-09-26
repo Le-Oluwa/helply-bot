@@ -1244,7 +1244,7 @@ async function loadBanned() {
     let html = "<table><tr><th>User ID</th><th>Username</th><th>Reason</th><th></th></tr>";
     users.forEach(function(u) {
       html += "<tr><td>" + u.id + "</td><td>@" + (u.username || "unknown") + "</td><td>" + (u.ban_reason || "—") + "</td>" +
-        "<td><button class='btn-ghost' onclick='unbanUser(\"" + u.id + "\")'>Unban</button></td></tr>";
+        "<td><button class='btn-ghost' onclick='unbanUser(\\"" + u.id + "\\")'>Unban</button></td></tr>";
     });
     html += "</table>";
     container.innerHTML = html;
@@ -1273,12 +1273,12 @@ async function openOrder(id) {
   try {
     const { order } = await api("/admin/api/orders/" + id);
     const buttons = [];
-    if (order.status !== "completed") buttons.push("<button class='btn-primary' onclick='resolveOrder(" + id + ",\"complete\")'>✅ Force complete</button>");
-    if (order.status === "matched" || order.status === "in_progress") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\"reset\")'>🔄 Reset to open</button>");
-    if (order.payment_status === "paid") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\"refund\")'>💵 Mark refunded</button>");
-    buttons.push("<button class='btn-danger' onclick='resolveOrder(" + id + ",\"void\")'>🗑 Void</button>");
-    buttons.push("<button class='btn-ghost' onclick='banFromOrder(\"" + order.user_id + "\"," + id + ")'>🚫 Ban requester</button>");
-    if (order.runner_id) buttons.push("<button class='btn-ghost' onclick='banFromOrder(\"" + order.runner_id + "\"," + id + ")'>🚫 Ban runner</button>");
+    if (order.status !== "completed") buttons.push("<button class='btn-primary' onclick='resolveOrder(" + id + ",\\"complete\\")'>✅ Force complete</button>");
+    if (order.status === "matched" || order.status === "in_progress") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\\"reset\\")'>🔄 Reset to open</button>");
+    if (order.payment_status === "paid") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\\"refund\\")'>💵 Mark refunded</button>");
+    buttons.push("<button class='btn-danger' onclick='resolveOrder(" + id + ",\\"void\\")'>🗑 Void</button>");
+    buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.user_id + "\\"," + id + ")'>🚫 Ban requester</button>");
+    if (order.runner_id) buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.runner_id + "\\"," + id + ")'>🚫 Ban runner</button>");
 
     document.getElementById("modalBody").innerHTML =
       "<button class='close-x' onclick='closeModal()'>✕</button>" +
