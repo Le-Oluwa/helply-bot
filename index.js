@@ -1117,11 +1117,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Helply Admin</title>
 <style>
-  :root { --bg:#0f1115; --card:#171a21; --border:#262b36; --text:#e8eaed; --muted:#8b93a1;
-          --yellow:#f5c542; --orange:#f59e42; --green:#4ade80; --red:#f87171; --blue:#60a5fa; --purple:#a78bfa; }
+  :root { --bg:#0d0d0d; --card:#1a1613; --border:#33291f; --text:#ffffff; --muted:#c9beb2;
+          --yellow:#f5c542; --orange:#FF6A13; --green:#4ade80; --red:#f87171; --blue:#FF6A13; --purple:#FF6A13; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
-  header { padding:20px 24px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  header { padding:20px 24px; border-bottom:2px solid var(--orange); display:flex; justify-content:space-between; align-items:center; }
   header h1 { font-size:18px; margin:0; }
   main { padding:24px; max-width:1000px; margin:0 auto; }
   section { margin-bottom:32px; }
@@ -1133,7 +1133,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   tr:hover td { background:#1c2028; cursor:pointer; }
   .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
   .badge.open        { background:rgba(245,197,66,0.15);  color:var(--yellow); }
-  .badge.matched     { background:rgba(245,158,66,0.15);  color:var(--orange); }
+  .badge.matched     { background:rgba(255,106,19,0.15);  color:var(--orange); }
   .badge.in_progress { background:rgba(74,222,128,0.15);  color:var(--green);  }
   .badge.completed   { background:rgba(96,165,250,0.15);  color:var(--blue);   }
   .badge.voided,
