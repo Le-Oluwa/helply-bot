@@ -57,6 +57,7 @@ const TERMS_TEXT = `📜 *Helply Terms & Conditions*
 
 *Payments*
 - Payments are processed through supported methods
+- Your name, email and phone number are shared with our payment provider to process your payments
 - Refunds are reviewed case-by-case
 
 *User Conduct*
@@ -139,6 +140,383 @@ function banMessage(user) {
 
 function formatNaira(n) {
   return `₦${Number(n || 0).toLocaleString("en-NG")}`;
+}
+
+// ================= INPUT VALIDATION =================
+// Keeps junk like "xyz" / "asdf" / "abc" out of the system, so every request
+// that reaches the Helpers is something they can actually act on.
+// These are heuristics (no AI involved): they catch the common kinds of
+// junk — filler words, keyboard mashing, alphabet runs, repeated letters,
+// symbols/emoji/numbers only — and let normal requests through.
+
+const JUNK_WORDS = new Set([
+  "xyz", "abc", "abcd", "asdf", "asdfg", "asdfgh", "qwerty", "qwe", "zxc",
+  "test", "testing", "tests", "sample", "dummy", "fake", "random", "blah", "foo", "bar",
+  "hi", "hello", "hey", "yo", "ok", "okay", "yes", "no", "nope", "nil", "none", "nothing", "na",
+  "idk", "lol", "lmao", "hmm", "hmmm", "something", "anything", "whatever", "stuff", "thing", "things"
+]);
+
+// Words that make no sense as a place to meet/deliver.
+const LOCATION_JUNK_WORDS = new Set([
+  ...JUNK_WORDS, "here", "there", "anywhere", "somewhere", "anyhow", "location"
+]);
+
+// Real short words/abbreviations that have no vowel (so they'd otherwise look like junk).
+const ABBREVIATIONS = new Set(["cv", "tv", "pdf", "pc", "hp", "ps", "sd", "ac", "dstv", "gotv", "id"]);
+
+const KEYBOARD_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+
+function tokenize(text) {
+  return String(text)
+    .toLowerCase()
+    .normalize("NFD").replace(/\p{M}/gu, "")   // ọ, ẹ, é ... -> o, e, e
+    .split(/[^a-z0-9']+/)
+    .map(t => t.replace(/'/g, ""))
+    .filter(Boolean);
+}
+
+// "abc", "xyz", "qwerty", "asdf", "mnb" ... (alphabet runs / keyboard rows, either direction)
+function isSequenceOrMash(t) {
+  if (t.length < 3 || !/^[a-z]+$/.test(t)) return false;
+  const rev = [...t].reverse().join("");
+  if (KEYBOARD_ROWS.some(row => row.includes(t) || row.includes(rev))) return true;
+  const codes = [...t].map(c => c.charCodeAt(0));
+  const asc  = codes.every((c, i) => i === 0 || c === codes[i - 1] + 1);
+  const desc = codes.every((c, i) => i === 0 || c === codes[i - 1] - 1);
+  return asc || desc;
+}
+
+function isWordlike(t, junk = JUNK_WORDS) {
+  if (t.length === 1) return t === "a" || t === "i";
+  if (/\d/.test(t)) return true;                      // a4, 80gsm, 2nd
+  if (junk.has(t)) return false;
+  if (ABBREVIATIONS.has(t)) return true;
+  if (isSequenceOrMash(t)) return false;              // abc, xyz, qwerty, asdf
+  if (!/[aeiouy]/.test(t)) return false;              // sdf, hmm, brr
+  if (/^(.)\1+$/.test(t)) return false;               // aaa, zzz
+  if (/(.)\1{3,}/.test(t)) return false;              // aaaa, hhhhh
+  if (/[^aeiouy]{6,}/.test(t)) return false;          // long consonant runs
+  return true;
+}
+
+// Returns the cleaned request text, or null if it isn't a proper request.
+function validateRequestText(input) {
+  const text = String(input || "").trim().replace(/\s+/g, " ");
+  if (text.length < 6 || text.length > 300) return null;
+  if (containsPhoneLikeNumber(text)) return null;
+
+  const nonSpace = text.replace(/\s/g, "");
+  const letters  = (nonSpace.match(/\p{L}/gu) || []).length;
+  if (letters < 5 || letters / nonSpace.length < 0.5) return null;   // mostly digits/symbols/emoji
+
+  // Single letters and plain numbers are neutral; judge the actual words.
+  const considered = tokenize(text).filter(t => t.length >= 2 && !/^\d+$/.test(t));
+  const real       = considered.filter(t => isWordlike(t));
+
+  if (real.length < 2) return null;                           // need at least two real words
+  if (real.length / considered.length < 0.6) return null;     // mostly gibberish
+  return text;
+}
+
+// Returns the cleaned location, or null if it doesn't look like a real place.
+function validateLocation(input) {
+  const text = String(input || "").trim().replace(/\s+/g, " ");
+  if (text.length < 3 || text.length > 120) return null;
+  if (containsPhoneLikeNumber(text)) return null;
+
+  const considered = tokenize(text).filter(t => t.length >= 2 && !/^\d+$/.test(t));
+  const real       = considered.filter(t => isWordlike(t, LOCATION_JUNK_WORDS));
+
+  // At least one real word of 3+ letters ("library", "hall", "gate", "room"...).
+  if (!real.some(t => t.length >= 3)) return null;
+  if (real.length / considered.length < 0.5) return null;
+  return text;
+}
+
+function validatePaperType(input) {
+  const text = String(input || "").trim().replace(/\s+/g, " ");
+  if (text.length < 2 || text.length > 40) return null;
+  if (!tokenize(text).some(t => t.length >= 2 && isWordlike(t))) return null;
+  return text;
+}
+
+// Anything that looks like a phone number or other long random number
+// (7+ digits, optionally spaced/dashed). Blocked in requests and locations:
+// it's almost always junk, and phone numbers there would let people take the
+// conversation (and the payment) off Helply. Once a Helper is matched and the
+// task is paid for, the two of them can chat right here in the bot.
+function containsPhoneLikeNumber(text) {
+  return /\d(?:[\s\-.]?\d){6,}/.test(String(text));
+}
+
+// Digits that look made-up: 0000000, 1111111, 12345678, 98765432, 080808080...
+function looksFakeDigits(digits) {
+  if (/^(\d)\1+$/.test(digits)) return true;          // all the same digit
+  if (/(\d)\1{4,}/.test(digits)) return true;         // 5+ of the same digit in a row
+  if (/(\d{2,3})\1{2,}/.test(digits)) return true;    // a short chunk repeated: 8080808080, 123123123
+
+  const counts = {};
+  for (const d of digits) counts[d] = (counts[d] || 0) + 1;
+  if (Math.max(...Object.values(counts)) >= Math.ceil(digits.length * 0.6)) return true;  // one digit dominates
+
+  let up = 1, down = 1;
+  for (let i = 1; i < digits.length; i++) {
+    const diff = Number(digits[i]) - Number(digits[i - 1]);
+    up   = diff === 1  ? up + 1   : 1;
+    down = diff === -1 ? down + 1 : 1;
+    if (up >= 5 || down >= 5) return true;            // 12345, 98765
+  }
+  return false;
+}
+
+const MAX_PRINT_PAGES = 500;
+
+// "10", "10 pages", "10pg" -> 10. Anything else (12abc, 0, 9999, 1e3) -> null.
+function parsePageCount(input) {
+  const m = String(input || "").trim().match(/^(\d{1,4})\s*(?:pages?|pgs?)?$/i);
+  const n = m ? parseInt(m[1], 10) : NaN;
+  return n >= 1 && n <= MAX_PRINT_PAGES ? n : null;
+}
+
+// Names that are obviously not real names.
+const NAME_JUNK_WORDS = new Set([
+  "xyz", "abc", "abcd", "asdf", "asdfg", "qwerty", "test", "testing", "sample", "dummy", "fake",
+  "random", "user", "name", "hello", "hi", "hey", "none", "nil", "idk", "lol", "blah", "foo", "bar"
+]);
+
+// Throwaway / placeholder email domains.
+const FAKE_EMAIL_DOMAINS = new Set([
+  "example.com", "example.org", "example.net", "test.com", "domain.com", "email.com",
+  "abc.com", "xyz.com", "asdf.com", "mailinator.com", "yopmail.com", "tempmail.com",
+  "guerrillamail.com", "10minutemail.com", "trashmail.com"
+]);
+
+const NO_PHONE_HELP =
+  "❌ Please don't put phone numbers or long numbers here — describe what you need in words instead. " +
+  "Once a Helper is matched and you've paid, you can chat with them right here in the bot.";
+
+function requestError(text)  { return containsPhoneLikeNumber(text) ? NO_PHONE_HELP : REQUEST_HELP; }
+function locationError(text) { return containsPhoneLikeNumber(text) ? NO_PHONE_HELP : LOCATION_HELP; }
+
+const REQUEST_HELP =
+  "❌ I couldn't make sense of that. Please tell me what you need in a few words — for example:\n\n" +
+  "• Buy jollof rice and chicken from the cafeteria\n" +
+  "• Print and bind my 20-page project\n" +
+  "• Pick up my parcel from the gate\n\n" +
+  "Try again:";
+
+const LOCATION_HELP =
+  "❌ That doesn't look like a real location. Tell the Helper where to meet you or drop it off — for example:\n\n" +
+  "• Block B, Room 204\n" +
+  "• Library main entrance\n\n" +
+  "Try again:";
+
+const PAPER_HELP = "❌ Please enter a paper type, e.g. A4, A3, Foolscap or Glossy.";
+
+// ================= SIGN-UP GATE =================
+// Every first-timer must sign up before they can use anything in the bot:
+//   1) accept the Terms, then
+//   2) give their full name, email and phone number (needed to process
+//      their payments through Flutterwave).
+// Progress is worked out from the database (not memory), so a restart or
+// redeploy in the middle of sign-up never loses anyone's place.
+
+async function sendTermsPrompt(userId) {
+  return bot.sendMessage(userId, TERMS_TEXT, {
+    parse_mode: "Markdown",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "✅ Accept",  callback_data: "accept_terms"  },
+        { text: "❌ Decline", callback_data: "decline_terms" }
+      ]]
+    }
+  });
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+// Needs a real-looking first and last name (letters only, plus . ' -).
+function cleanFullName(input) {
+  const name = String(input || "").trim().replace(/\s+/g, " ");
+  if (name.length < 3 || name.length > 80) return null;
+  if (!/^[\p{L}][\p{L} .'-]*$/u.test(name)) return null;
+  if (name.split(" ").length < 2) return null;
+
+  const parts = tokenize(name).filter(t => t.length >= 2);          // ignore initials like "O."
+  if (parts.length < 2) return null;
+  if (!parts.every(t => isWordlike(t, NAME_JUNK_WORDS))) return null;   // Xyz Abc, Asdf Qwerty, Test User
+  return name;
+}
+
+function cleanEmail(input) {
+  const email = String(input || "").trim().toLowerCase();
+  if (email.length > 254 || !EMAIL_RE.test(email)) return null;
+
+  const [local, domain] = email.split("@");
+  if (FAKE_EMAIL_DOMAINS.has(domain)) return null;
+
+  const letters = local.replace(/[^a-z]/g, "");
+  if (letters.length >= 3 &&
+      (JUNK_WORDS.has(letters) || isSequenceOrMash(letters) || /^(.)\1+$/.test(letters))) return null;   // xyz@, asdf@, aaaa@
+  if (/^\d+$/.test(local) && (local.length < 8 || looksFakeDigits(local))) return null;               // 12345@gmail.com
+  return email;
+}
+
+// Accepts real-looking numbers only:
+//   Nigerian mobiles — 080XXXXXXXX / +23480XXXXXXXX / 23480XXXXXXXX (prefixes 70, 80, 81, 90, 91),
+//   or another country's number written as +<country code><number>.
+// Rejects made-up ones (00000000000, 11111111111, 12345678901, 08080808080 ...).
+// Always returns the number as +<digits>, or null.
+function cleanPhone(input) {
+  const p = String(input || "").trim().replace(/[\s\-().]/g, "");
+
+  let national = null;
+  let e164 = null;
+  if (/^0\d{10}$/.test(p))          { national = p.slice(1); e164 = "+234" + national; }
+  else if (/^234\d{10}$/.test(p))   { national = p.slice(3); e164 = "+" + p; }
+  else if (/^\+234\d{10}$/.test(p)) { national = p.slice(4); e164 = p; }
+
+  if (national) {
+    if (!/^(70|80|81|90|91)\d{8}$/.test(national)) return null;    // not a real Nigerian mobile prefix
+    return looksFakeDigits(national) ? null : e164;
+  }
+
+  if (/^\+?234/.test(p)) return null;                              // looked Nigerian but wrong length
+  if (/^\+\d{8,15}$/.test(p)) return looksFakeDigits(p.slice(1)) ? null : p;
+  return null;
+}
+
+function nextMissingDetail(user) {
+  if (!user.full_name) return "full_name";
+  if (!user.email)     return "email";
+  if (!user.phone)     return "phone";
+  return null;
+}
+
+// Signed up = accepted the Terms AND gave all three details.
+function isSignedUp(user) {
+  return !!(user && user.accepted_terms && !nextMissingDetail(user));
+}
+
+// Telegram's own "share my number" button: the number it sends has been
+// verified by Telegram, so it can't be made up.
+const PHONE_KEYBOARD = {
+  reply_markup: {
+    keyboard: [[{ text: "📱 Share my phone number", request_contact: true }]],
+    resize_keyboard: true,
+    one_time_keyboard: true
+  }
+};
+
+const DETAIL_PROMPTS = {
+  full_name: "👤 What's your full name? (first and last name)",
+  email:     "📧 What's your email address? (a real one — it's used for your payment receipts)",
+  phone:     "📱 What's your phone number?\n\nTap the button below to share it — that's the quickest way. Or type it, e.g. 080XXXXXXXX."
+};
+
+async function sendDetailPrompt(userId, field, intro = "") {
+  return bot.sendMessage(userId, `${intro}${DETAIL_PROMPTS[field]}`, field === "phone" ? PHONE_KEYBOARD : undefined);
+}
+
+// Treats the user's message as their answer to the detail we're asking for.
+// `text` is their typed answer (or null); `contact` is a shared Telegram contact (or null).
+async function handleSignupAnswer(userId, user, field, text, contact) {
+  let value = null;
+  let verified = false;
+  let errorText = "";
+
+  if (field === "full_name") {
+    value = text === null ? null : cleanFullName(text);
+    errorText = "❌ Please enter your real full name — first and last name (letters only).";
+  } else if (field === "email") {
+    value = text === null ? null : cleanEmail(text);
+    errorText = "❌ That doesn't look like a real email address. Try again (e.g. yourname@gmail.com).";
+  } else if (field === "phone") {
+    if (contact) {
+      // Only accept the user's OWN contact (not a friend's) from the share button.
+      if (String(contact.user_id) === userId) {
+        const digits = String(contact.phone_number || "").replace(/\D/g, "");
+        if (digits.length >= 8 && digits.length <= 15) { value = "+" + digits; verified = true; }
+      }
+      errorText = "❌ Please share your own number with the button below, or type it.";
+    } else {
+      value = text === null ? null : cleanPhone(text);
+      errorText = "❌ That doesn't look like a real phone number. Tap the button below to share yours, or type a valid number (e.g. 080XXXXXXXX).";
+    }
+  }
+
+  if (!value) {
+    return bot.sendMessage(userId, errorText, field === "phone" ? PHONE_KEYBOARD : undefined);
+  }
+
+  const { error } = await supabase.from("users").update({ [field]: value }).eq("id", userId);
+  if (error) {
+    console.log("SIGNUP DETAIL SAVE ERROR:", error.message);
+    return bot.sendMessage(userId, "❌ Something went wrong saving that. Please try again.");
+  }
+
+  if (verified) {
+    // Best-effort: remember that Telegram verified this number.
+    const { error: vErr } = await supabase.from("users").update({ phone_verified: true }).eq("id", userId);
+    if (vErr) console.log("PHONE VERIFIED SAVE ERROR:", vErr.message);
+  }
+
+  const next = nextMissingDetail({ ...user, [field]: value });
+  if (next) return sendDetailPrompt(userId, next);
+
+  return bot.sendMessage(
+    userId,
+    "🎉 You're all set! Send your request, or use the buttons below anytime.",
+    mainReplyKeyboard
+  );
+}
+
+// Returns the user row only if they're fully signed up and not banned.
+// Otherwise it replies with the right prompt (Terms / next detail /
+// suspension) and returns null, so callers can just `if (!user) return;`.
+// Pass `answerText` (a plain text message) so that, mid-sign-up, it's
+// treated as the answer to the detail being asked for.
+async function ensureSignedUp(from, answerText = null, contact = null) {
+  const userId = from.id.toString();
+  try {
+    let { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
+
+    if (!user) {
+      // Brand-new user: create the account as NOT yet signed up.
+      // ignoreDuplicates keeps this safe if two messages arrive at once.
+      const { error } = await supabase.from("users").upsert(
+        [{ id: userId, username: from.username || "", accepted_terms: false, banned: false }],
+        { onConflict: "id", ignoreDuplicates: true }
+      );
+      if (error) console.log("SIGNUP INSERT ERROR:", error.message);
+      user = { id: userId, accepted_terms: false };
+    }
+
+    if (user.banned) {
+      await bot.sendMessage(userId, banMessage(user));
+      return null;
+    }
+
+    if (!user.accepted_terms) {
+      await sendTermsPrompt(userId);
+      return null;
+    }
+
+    const missing = nextMissingDetail(user);
+    if (missing) {
+      if (answerText !== null || contact) {
+        await handleSignupAnswer(userId, user, missing, answerText, contact);
+      } else {
+        await sendDetailPrompt(userId, missing, "📝 Let's finish setting up your account first.\n\n");
+      }
+      return null;
+    }
+
+    return user;
+  } catch (err) {
+    console.log("SIGNUP CHECK ERROR:", err.message);
+    return null;
+  }
 }
 
 function offerButtons(offerId, forRunner) {
@@ -461,30 +839,10 @@ Need a hand? 📧 ${SUPPORT_EMAIL}`,
 // ================= /start =================
 
 bot.onText(/\/start/, async (msg) => {
-  const userId   = msg.from.id.toString();
-  const username = msg.from.username || "";
+  const user = await ensureSignedUp(msg.from);
+  if (!user) return; // first-timers see the sign-up (terms) prompt instead
 
-  let { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
-
-  if (!user) {
-    await supabase.from("users").insert([{ id: userId, username, accepted_terms: false, banned: false }]);
-    user = { id: userId, accepted_terms: false };
-  }
-
-  if (user.banned) return bot.sendMessage(userId, banMessage(user));
-
-  if (!user.accepted_terms) {
-    return bot.sendMessage(userId, TERMS_TEXT, {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [[
-          { text: "✅ Accept",  callback_data: "accept_terms"  },
-          { text: "❌ Decline", callback_data: "decline_terms" }
-        ]]
-      }
-    });
-  }
-
+  const userId = msg.from.id.toString();
   clearPendingState(userId);
   return bot.sendMessage(
     userId,
@@ -493,36 +851,44 @@ bot.onText(/\/start/, async (msg) => {
   );
 });
 
-bot.onText(/\/becomehelper/, (msg) => sendBecomeHelperMessage(msg.from.id.toString()));
-bot.onText(/\/stats/,        (msg) => sendStatsMessage(msg.from.id.toString()));
-bot.onText(/\/services/,     (msg) => sendServicesMenu(msg.from.id.toString()));
-bot.onText(/\/help/,         (msg) => sendHelpMessage(msg.from.id.toString()));
+bot.onText(/\/becomehelper/, async (msg) => {
+  if (!(await ensureSignedUp(msg.from))) return;
+  return sendBecomeHelperMessage(msg.from.id.toString());
+});
+
+bot.onText(/\/stats/, async (msg) => {
+  if (!(await ensureSignedUp(msg.from))) return;
+  return sendStatsMessage(msg.from.id.toString());
+});
+
+bot.onText(/\/services/, async (msg) => {
+  if (!(await ensureSignedUp(msg.from))) return;
+  return sendServicesMenu(msg.from.id.toString());
+});
+
+bot.onText(/\/help/, async (msg) => {
+  if (!(await ensureSignedUp(msg.from))) return;
+  return sendHelpMessage(msg.from.id.toString());
+});
 
 // ================= MESSAGE =================
 
 bot.on("message", async (msg) => {
   if (msg.chat.type !== "private") return;
 
+  // Commands (/start, /help, ...) are handled by their own onText handlers,
+  // each of which runs the sign-up check. Skip them here so a first-timer
+  // doesn't get the sign-up prompt twice.
+  if (msg.text && msg.text.startsWith("/")) return;
+
   const userId = msg.from.id.toString();
 
-  let { data: user } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
-  let currentUser = user;
-
-  if (!currentUser) {
-    const { error } = await supabase.from("users").insert([{
-      id:             userId,
-      username:       msg.from.username || "",
-      accepted_terms: true
-    }]);
-    if (error) {
-      console.log("INSERT ERROR:", error.message);
-      return bot.sendMessage(userId, "❌ Error creating account");
-    }
-    currentUser = { id: userId, accepted_terms: true };
-  }
-
-  if (currentUser.banned)          return bot.sendMessage(userId, banMessage(currentUser));
-  if (!currentUser.accepted_terms) return bot.sendMessage(userId, "⚠️ Please accept terms using /start");
+  // First-timers (and anyone who hasn't accepted the terms) must sign up
+  // before the bot will do anything else for them.
+  // (Reply-keyboard button taps aren't answers, so don't treat them as such.)
+  const isButtonTap = [BTN_SERVICES, BTN_BECOME_HELPER, BTN_STATS, BTN_HELP].includes(msg.text);
+  const currentUser = await ensureSignedUp(msg.from, isButtonTap ? null : (msg.text ?? null), msg.contact || null);
+  if (!currentUser) return;
 
   const state = pendingState[userId];
 
@@ -552,16 +918,18 @@ bot.on("message", async (msg) => {
 
   // ── Printing: paper type ──────────────────────────────────────────────────
   if (state?.mode === "print_paper") {
-    const printData = { ...state.printData, paper: text };
+    const paper = validatePaperType(text);
+    if (!paper) return bot.sendMessage(userId, PAPER_HELP);
+    const printData = { ...state.printData, paper };
     pendingState[userId] = { mode: "print_pages", printData };
     return bot.sendMessage(userId, "📄 How many pages?");
   }
 
   // ── Printing: page count ──────────────────────────────────────────────────
   if (state?.mode === "print_pages") {
-    const pages = parseInt(text, 10);
-    if (isNaN(pages) || pages <= 0) {
-      return bot.sendMessage(userId, "❌ Enter a valid number of pages (e.g. 10).");
+    const pages = parsePageCount(text);
+    if (pages === null) {
+      return bot.sendMessage(userId, `❌ Enter the number of pages as a number from 1 to ${MAX_PRINT_PAGES} (e.g. 10).`);
     }
     const printData = { ...state.printData, pages };
     pendingState[userId] = { mode: "print_binding_wait", printData };
@@ -577,7 +945,10 @@ bot.on("message", async (msg) => {
 
   // ── Printing: special note ────────────────────────────────────────────────
   if (state?.mode === "print_note") {
-    const note      = text.toLowerCase() === "none" ? null : text;
+    const note = text.toLowerCase() === "none" ? null : text;
+    if (note && (note.length > 200 || containsPhoneLikeNumber(note))) {
+      return bot.sendMessage(userId, "❌ Please keep the note short (200 characters max) and don't include phone numbers.");
+    }
     const printData = { ...state.printData, note };
     pendingState[userId] = { mode: "print_delivery_location", printData };
     return bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
@@ -585,14 +956,18 @@ bot.on("message", async (msg) => {
 
   // ── Printing: delivery location ───────────────────────────────────────────
   if (state?.mode === "print_delivery_location") {
-    const printData = { ...state.printData, location: text };
+    const location = validateLocation(text);
+    if (!location) return bot.sendMessage(userId, locationError(text));
+    const printData = { ...state.printData, location };
     pendingState[userId] = { mode: "print_upload_wait", printData };
     return bot.sendMessage(userId, "📎 Now send the document you'd like printed — as a file or a photo.");
   }
 
   // ── Category detail ───────────────────────────────────────────────────────
   if (state?.mode === "category_detail") {
-    const requestText = state.category ? `[${state.category}] ${text}` : text;
+    const request = validateRequestText(text);
+    if (!request) return bot.sendMessage(userId, requestError(text));
+    const requestText = state.category ? `[${state.category}] ${request}` : request;
     pendingState[userId] = { mode: "location", request: requestText, category: state.category };
     return bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
   }
@@ -600,7 +975,8 @@ bot.on("message", async (msg) => {
   // ── Location step ─────────────────────────────────────────────────────────
   if (state?.mode === "location") {
     const requestText  = state.request;
-    const locationText = text;
+    const locationText = validateLocation(text);
+    if (!locationText) return bot.sendMessage(userId, locationError(text));
 
     if (state.category === "Laundry") {
       pendingState[userId] = { mode: "laundry_photo_wait", requestText, locationText };
@@ -672,7 +1048,10 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "❌ Finish your current task first");
   }
 
-  pendingState[userId] = { mode: "location", request: text };
+  const request = validateRequestText(text);
+  if (!request) return bot.sendMessage(userId, requestError(text));
+
+  pendingState[userId] = { mode: "location", request };
   await bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
 });
 
@@ -685,6 +1064,11 @@ bot.on("callback_query", async (q) => {
   try {
     const requester = await getUser(userId);
     if (requester?.banned) return denyCallback(q, "🚫 Your account has been suspended.");
+
+    // Only the sign-up buttons work until the user has finished signing up.
+    if (!isSignedUp(requester) && data !== "accept_terms" && data !== "decline_terms") {
+      return denyCallback(q, "⚠️ Please finish signing up first — open Helply privately and send /start");
+    }
 
     // SERVICES MENU
     if (data.startsWith("service_")) {
@@ -738,7 +1122,19 @@ bot.on("callback_query", async (q) => {
     // ACCEPT / DECLINE TERMS
     if (data === "accept_terms") {
       await supabase.from("users").update({ accepted_terms: true }).eq("id", userId);
-      await bot.sendMessage(userId, "🎉 You're in! Send your request, or use the buttons below anytime.", mainReplyKeyboard);
+
+      // Next sign-up step: their details (or finish, if they already have them).
+      const fresh = await getUser(userId);
+      const next = fresh ? nextMissingDetail(fresh) : "full_name";
+      if (next) {
+        await sendDetailPrompt(
+          userId,
+          next,
+          "✅ Terms accepted!\n\nLast step — we need a few details so your payments can be processed. They're only shared with our payment provider.\n\n"
+        );
+      } else {
+        await bot.sendMessage(userId, "🎉 You're in! Send your request, or use the buttons below anytime.", mainReplyKeyboard);
+      }
       return bot.answerCallbackQuery(q.id);
     }
     if (data === "decline_terms") {
