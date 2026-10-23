@@ -794,6 +794,322 @@ async function sendServicesMenu(userId) {
   });
 }
 
+// ================= FOOD MENUS =================
+// To add a restaurant, change a price or hide something, edit FOOD_RESTAURANTS.
+// Rules: restaurant ids and group ids must not contain "_"; item ids must be unique.
+// A group with ONE item is added straight to the cart when tapped; a group with
+// several items (e.g. pizza sizes) opens a small picker first.
+
+const FOOD_RESTAURANTS = [
+  {
+    id: "pr",
+    name: "Pizza Republic",
+    active: true,
+    groups: [
+      { id: "burger", label: "🍔 Burger", items: [
+        { id: "pr_burger", name: "Burger", short: "Burger", price: 2000 }
+      ]},
+      { id: "bbq", label: "🍕 Chicken BBQ Pizza", items: [
+        { id: "pr_bbq_s", name: "Chicken BBQ Pizza (Small)",  short: "BBQ Small",  size: "Small",  price: 3500 },
+        { id: "pr_bbq_m", name: "Chicken BBQ Pizza (Medium)", short: "BBQ Medium", size: "Medium", price: 4500 },
+        { id: "pr_bbq_b", name: "Chicken BBQ Pizza (Big)",    short: "BBQ Big",    size: "Big",    price: 6500 }
+      ]},
+      { id: "suya", label: "🍕 Chicken Suya Pizza", items: [
+        { id: "pr_suya_s", name: "Chicken Suya Pizza (Small)",  short: "Suya Small",  size: "Small",  price: 3500 },
+        { id: "pr_suya_m", name: "Chicken Suya Pizza (Medium)", short: "Suya Medium", size: "Medium", price: 4500 },
+        { id: "pr_suya_b", name: "Chicken Suya Pizza (Big)",    short: "Suya Big",    size: "Big",    price: 6500 }
+      ]},
+      { id: "pep", label: "🍕 Pepperoni Pizza", items: [
+        { id: "pr_pep_s", name: "Pepperoni Pizza (Small)",  short: "Pepperoni Small",  size: "Small",  price: 3500 },
+        { id: "pr_pep_m", name: "Pepperoni Pizza (Medium)", short: "Pepperoni Medium", size: "Medium", price: 4500 },
+        { id: "pr_pep_b", name: "Pepperoni Pizza (Big)",    short: "Pepperoni Big",    size: "Big",    price: 6500 }
+      ]},
+      { id: "extras", label: "➕ Extras (toppings)", items: [
+        { id: "pr_xcheese",  name: "Extra Cheese (Topping)",  short: "Extra Cheese",  price: 1000 },
+        { id: "pr_xchicken", name: "Extra Chicken (Topping)", short: "Extra Chicken", price: 500 }
+      ]}
+    ]
+  }
+];
+
+const FOOD_MAX_PER_ITEM = 10;
+const FOOD_MAX_ITEMS    = 20;
+
+function findFoodRestaurant(id) {
+  return FOOD_RESTAURANTS.find(r => r.id === id && r.active) || null;
+}
+
+function findFoodItem(itemId) {
+  for (const restaurant of FOOD_RESTAURANTS) {
+    for (const group of restaurant.groups) {
+      for (const item of group.items) {
+        if (item.id === itemId) return { restaurant, group, item };
+      }
+    }
+  }
+  return null;
+}
+
+// The cart lives in pendingState (like the printing flow), so it resets if the bot restarts.
+function getFoodCart(userId, restaurantId) {
+  const st = pendingState[userId];
+  if (!st || st.mode !== "food_cart" || st.restaurantId !== restaurantId) {
+    pendingState[userId] = { mode: "food_cart", restaurantId, cart: {} };
+  }
+  return pendingState[userId].cart;
+}
+
+function foodCartCount(cart) {
+  return Object.values(cart).reduce((sum, qty) => sum + qty, 0);
+}
+
+// Items in the cart, in menu order: [{ item, qty }]
+function foodCartLines(restaurant, cart) {
+  const lines = [];
+  for (const group of restaurant.groups) {
+    for (const item of group.items) {
+      if (cart[item.id] > 0) lines.push({ item, qty: cart[item.id] });
+    }
+  }
+  return lines;
+}
+
+function foodCartTotal(restaurant, cart) {
+  return foodCartLines(restaurant, cart).reduce((sum, { item, qty }) => sum + item.price * qty, 0);
+}
+
+function foodLinesText(lines) {
+  return lines.map(({ item, qty }) => `• ${qty}× ${item.name} — ${formatNaira(item.price * qty)}`).join("\n");
+}
+
+function renderFoodMenu(restaurant, cart) {
+  const lines = foodCartLines(restaurant, cart);
+
+  let text = `🍽️ ${restaurant.name}\n\nTap an item to add it to your order.\n\n`;
+  if (lines.length) {
+    text += `🛒 Your order:\n${foodLinesText(lines)}\n\n💰 Food total: ${formatNaira(foodCartTotal(restaurant, cart))}`;
+  } else {
+    text += "🛒 Your order is empty.";
+  }
+  text += "\n\nPrices are the restaurant's and may change.";
+
+  const rows = restaurant.groups.map(group => {
+    if (group.items.length === 1) {
+      const item = group.items[0];
+      return [{ text: `${group.label} — ${formatNaira(item.price)}`, callback_data: `food_add_${item.id}` }];
+    }
+    return [{ text: group.label, callback_data: `food_grp_${restaurant.id}_${group.id}` }];
+  });
+
+  if (lines.length) {
+    rows.push([
+      { text: "🛒 Edit cart",             callback_data: `food_cart_${restaurant.id}` },
+      { text: "✅ Done — add location",   callback_data: `food_done_${restaurant.id}` }
+    ]);
+  }
+  rows.push([{ text: "✏️ Order from somewhere else", callback_data: "food_other" }]);
+  rows.push([{ text: "❌ Cancel", callback_data: "food_cancel" }]);
+
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+function renderFoodGroup(restaurant, group) {
+  const rows = group.items.map(item => [{
+    text: `${item.size || item.short} — ${formatNaira(item.price)}`,
+    callback_data: `food_add_${item.id}`
+  }]);
+  rows.push([{ text: "⬅️ Back to menu", callback_data: `food_menu_${restaurant.id}` }]);
+  return { text: `${group.label}\n\nPick one to add it to your order.`, reply_markup: { inline_keyboard: rows } };
+}
+
+function renderFoodCart(restaurant, cart) {
+  const lines = foodCartLines(restaurant, cart);
+  const text =
+    `🛒 Your order — ${restaurant.name}\n\n${foodLinesText(lines)}\n\n` +
+    `💰 Food total: ${formatNaira(foodCartTotal(restaurant, cart))}\n\nUse ➖ / ➕ to change quantities.`;
+
+  const rows = lines.map(({ item, qty }) => [
+    { text: "➖",                      callback_data: `food_dec_${item.id}` },
+    { text: `${qty}× ${item.short}`,  callback_data: "food_noop" },
+    { text: "➕",                      callback_data: `food_inc_${item.id}` }
+  ]);
+  rows.push([
+    { text: "🗑 Clear",          callback_data: `food_clear_${restaurant.id}` },
+    { text: "⬅️ Back to menu",   callback_data: `food_menu_${restaurant.id}` }
+  ]);
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+// Called when someone taps Food Runs. Returns false if there's no active
+// restaurant, so the caller can fall back to the free-text request flow.
+async function startFoodOrder(userId) {
+  const active = FOOD_RESTAURANTS.filter(r => r.active);
+  if (active.length === 0) return false;
+
+  if (active.length === 1) {
+    pendingState[userId] = { mode: "food_cart", restaurantId: active[0].id, cart: {} };
+    const screen = renderFoodMenu(active[0], {});
+    await bot.sendMessage(userId, screen.text, { reply_markup: screen.reply_markup });
+    return true;
+  }
+
+  const rows = active.map(r => [{ text: `🍽️ ${r.name}`, callback_data: `food_rest_${r.id}` }]);
+  rows.push([{ text: "✏️ Somewhere else", callback_data: "food_other" }]);
+  rows.push([{ text: "❌ Cancel",         callback_data: "food_cancel" }]);
+  await bot.sendMessage(userId, "🍽️ Where would you like to order from?", { reply_markup: { inline_keyboard: rows } });
+  return true;
+}
+
+async function handleFoodCallback(q, data, userId) {
+  const chatId    = q.message.chat.id;
+  const messageId = q.message.message_id;
+
+  // Edit the menu message in place (ignores Telegram's "message is not modified").
+  async function show(text, reply_markup) {
+    try {
+      await bot.editMessageText(text, { chat_id: chatId, message_id: messageId, reply_markup });
+    } catch (err) {
+      if (!/not modified/i.test(err.message)) console.log("FOOD MENU EDIT ERROR:", err.message);
+    }
+  }
+
+  if (data === "food_noop") return bot.answerCallbackQuery(q.id);
+
+  if (data === "food_cancel") {
+    clearPendingState(userId);
+    await show("❌ Food order cancelled.", { inline_keyboard: [] });
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // Not on the menu: fall back to typing the request
+  if (data === "food_other") {
+    pendingState[userId] = { mode: "category_detail", category: "Food Runs" };
+    await show("✏️ Custom food order", { inline_keyboard: [] });
+    await bot.sendMessage(userId, "📝 Tell me what you need (e.g. \"2 portions of jollof rice and chicken from Mama Put\"):");
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  if (data.startsWith("food_rest_")) {
+    const restaurant = findFoodRestaurant(data.slice("food_rest_".length));
+    if (!restaurant) return denyCallback(q, "❌ That restaurant isn't available right now");
+    pendingState[userId] = { mode: "food_cart", restaurantId: restaurant.id, cart: {} };
+    const screen = renderFoodMenu(restaurant, {});
+    await show(screen.text, screen.reply_markup);
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  if (data.startsWith("food_menu_")) {
+    const restaurant = findFoodRestaurant(data.slice("food_menu_".length));
+    if (!restaurant) return denyCallback(q, "❌ That restaurant isn't available right now");
+    const screen = renderFoodMenu(restaurant, getFoodCart(userId, restaurant.id));
+    await show(screen.text, screen.reply_markup);
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  if (data.startsWith("food_grp_")) {
+    const [, , restaurantId, groupId] = data.split("_");
+    const restaurant = findFoodRestaurant(restaurantId);
+    const group = restaurant && restaurant.groups.find(g => g.id === groupId);
+    if (!group) return denyCallback(q, "❌ That item isn't available right now");
+    const screen = renderFoodGroup(restaurant, group);
+    await show(screen.text, screen.reply_markup);
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // Add from the menu / a size picker -> back to the menu
+  if (data.startsWith("food_add_")) {
+    const found = findFoodItem(data.slice("food_add_".length));
+    if (!found || !findFoodRestaurant(found.restaurant.id)) return denyCallback(q, "❌ That item isn't available right now");
+
+    const cart = getFoodCart(userId, found.restaurant.id);
+    if ((cart[found.item.id] || 0) >= FOOD_MAX_PER_ITEM || foodCartCount(cart) >= FOOD_MAX_ITEMS) {
+      return denyCallback(q, "❌ That's the maximum quantity for one order");
+    }
+    cart[found.item.id] = (cart[found.item.id] || 0) + 1;
+
+    await bot.answerCallbackQuery(q.id, { text: `✅ Added ${found.item.name}` });
+    const screen = renderFoodMenu(found.restaurant, cart);
+    return show(screen.text, screen.reply_markup);
+  }
+
+  if (data.startsWith("food_cart_")) {
+    const restaurant = findFoodRestaurant(data.slice("food_cart_".length));
+    if (!restaurant) return denyCallback(q, "❌ That restaurant isn't available right now");
+    const cart = getFoodCart(userId, restaurant.id);
+    const screen = foodCartLines(restaurant, cart).length ? renderFoodCart(restaurant, cart) : renderFoodMenu(restaurant, cart);
+    await show(screen.text, screen.reply_markup);
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // + / - inside the cart screen
+  if (data.startsWith("food_inc_") || data.startsWith("food_dec_")) {
+    const isInc = data.startsWith("food_inc_");
+    const found = findFoodItem(data.slice("food_inc_".length));   // same length as "food_dec_"
+    if (!found || !findFoodRestaurant(found.restaurant.id)) return denyCallback(q, "❌ That item isn't available right now");
+
+    const cart = getFoodCart(userId, found.restaurant.id);
+    const current = cart[found.item.id] || 0;
+
+    if (isInc) {
+      if (current >= FOOD_MAX_PER_ITEM || foodCartCount(cart) >= FOOD_MAX_ITEMS) {
+        return denyCallback(q, "❌ That's the maximum quantity for one order");
+      }
+      cart[found.item.id] = current + 1;
+    } else if (current <= 1) {
+      delete cart[found.item.id];
+    } else {
+      cart[found.item.id] = current - 1;
+    }
+
+    await bot.answerCallbackQuery(q.id);
+    const screen = foodCartLines(found.restaurant, cart).length
+      ? renderFoodCart(found.restaurant, cart)
+      : renderFoodMenu(found.restaurant, cart);
+    return show(screen.text, screen.reply_markup);
+  }
+
+  if (data.startsWith("food_clear_")) {
+    const restaurant = findFoodRestaurant(data.slice("food_clear_".length));
+    if (!restaurant) return denyCallback(q, "❌ That restaurant isn't available right now");
+    const cart = getFoodCart(userId, restaurant.id);
+    for (const key of Object.keys(cart)) delete cart[key];
+    const screen = renderFoodMenu(restaurant, cart);
+    await show(screen.text, screen.reply_markup);
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  // Done picking food -> now ask for the delivery location
+  if (data.startsWith("food_done_")) {
+    const restaurant = findFoodRestaurant(data.slice("food_done_".length));
+    if (!restaurant) return denyCallback(q, "❌ That restaurant isn't available right now");
+
+    const cart  = getFoodCart(userId, restaurant.id);
+    const lines = foodCartLines(restaurant, cart);
+    if (!lines.length) return denyCallback(q, "❌ Your order is empty — add something first");
+
+    const total   = foodCartTotal(restaurant, cart);
+    const summary = lines.map(({ item, qty }) => `${qty}× ${item.name}`).join(", ");
+
+    // From here the normal request flow takes over: location -> post to Helpers.
+    pendingState[userId] = {
+      mode: "location",
+      request: `[Food Runs] ${restaurant.name} — ${summary}`,
+      category: "Food Runs",
+      foodCost: total
+    };
+
+    await show(
+      `🧾 Your order — ${restaurant.name}\n\n${foodLinesText(lines)}\n\n💰 Food total: ${formatNaira(total)}\n\n` +
+      "You'll pay this plus the Helper's delivery fee (agreed with the Helper).",
+      { inline_keyboard: [] }
+    );
+    await bot.sendMessage(userId, "📍 Where should the Helper deliver this?");
+    return bot.answerCallbackQuery(q.id);
+  }
+
+  return denyCallback(q, "❌ Unknown action");
+}
+
 // ================= COMMAND HANDLERS =================
 
 async function sendBecomeHelperMessage(userId) {
@@ -963,6 +1279,11 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(userId, "📎 Now send the document you'd like printed — as a file or a photo.");
   }
 
+  // ── Food menu: use the buttons ────────────────────────────────────────────
+  if (state?.mode === "food_cart") {
+    return bot.sendMessage(userId, "🍽️ Please use the buttons on the menu above to pick your food — or tap ❌ Cancel to start over.");
+  }
+
   // ── Category detail ───────────────────────────────────────────────────────
   if (state?.mode === "category_detail") {
     const request = validateRequestText(text);
@@ -977,6 +1298,11 @@ bot.on("message", async (msg) => {
     const requestText  = state.request;
     const locationText = validateLocation(text);
     if (!locationText) return bot.sendMessage(userId, locationError(text));
+
+    // Set when the order came from the food menu
+    const foodLine = state.foodCost
+      ? `\n\n🍽 Food total: ${formatNaira(state.foodCost)} (added to your total once a Helper is matched)`
+      : "";
 
     if (state.category === "Laundry") {
       pendingState[userId] = { mode: "laundry_photo_wait", requestText, locationText };
@@ -998,7 +1324,8 @@ bot.on("message", async (msg) => {
       request_text:      requestText,
       delivery_location: locationText,
       status:            "open",
-      payment_status:    "pending"
+      payment_status:    "pending",
+      ...(state.foodCost ? { category: "Food Runs", food_cost: state.foodCost } : {})
     }]);
 
     clearPendingState(userId);
@@ -1010,13 +1337,13 @@ bot.on("message", async (msg) => {
 
     await bot.sendMessage(
       userId,
-      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}\n\n⏳ Please wait while we match you with a Helper...`,
+      `✅ Request sent successfully!\n\n🆔 Request ID: ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}${foodLine}\n\n⏳ Please wait while we match you with a Helper...`,
       { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel Request", callback_data: `cancelreq_${taskId}` }]] } }
     );
 
     await bot.sendMessage(
       RUNNER_GROUP_ID,
-      `🚨 NEW REQUEST\n\n🆔 ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}`,
+      `🚨 NEW REQUEST\n\n🆔 ${taskId}\n\n📦 Request:\n${requestText}\n\n📍 Location:\n${locationText}${foodLine}`,
       {
         message_thread_id: GIGS_TOPIC_ID,
         reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${taskId}` }]] }
@@ -1070,9 +1397,16 @@ bot.on("callback_query", async (q) => {
       return denyCallback(q, "⚠️ Please finish signing up first — open Helply privately and send /start");
     }
 
+    // FOOD MENU buttons (pick items -> cart -> delivery location)
+    if (data.startsWith("food_")) return await handleFoodCallback(q, data, userId);
+
     // SERVICES MENU
     if (data.startsWith("service_")) {
       const key = data.split("_")[1];
+
+      // Food Runs opens the menu (when there's an active restaurant); otherwise it falls
+      // through to the free-text request flow below.
+      if (key === "food" && await startFoodOrder(userId)) return bot.answerCallbackQuery(q.id);
 
       if (key === "other") {
         pendingState[userId] = { mode: "category_detail", category: null };
@@ -1284,7 +1618,8 @@ bot.on("callback_query", async (q) => {
       const runnerFee    = Number(o.current_price);
       const runnerPayout = Math.round(runnerFee * 0.9);
       const printCost    = Number(order.print_cost || 0);
-      const userPrice    = Math.round(runnerFee * 1.3) + printCost;
+      const foodCost     = Number(order.food_cost || 0);
+      const userPrice    = Math.round(runnerFee * 1.3) + printCost + foodCost;
 
       await supabase.from("orders").update({
         runner_id:       o.runner_id,
@@ -1301,7 +1636,10 @@ bot.on("callback_query", async (q) => {
       clearPendingState(o.runner_id);
 
       const link            = `${PAYMENT_BASE_URL}/create-payment?orderId=${o.order_id}`;
-      const priceBreakdown  = printCost > 0 ? ` (includes ${formatNaira(printCost)} printing cost)` : "";
+      const includes = [];
+      if (printCost > 0) includes.push(`${formatNaira(printCost)} printing`);
+      if (foodCost > 0)  includes.push(`${formatNaira(foodCost)} food`);
+      const priceBreakdown = includes.length ? ` (includes ${includes.join(" + ")})` : "";
 
       await bot.sendMessage(
         o.runner_id,
@@ -1361,7 +1699,7 @@ bot.on("callback_query", async (q) => {
 
         await bot.sendMessage(
           RUNNER_GROUP_ID,
-          `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n\n📦 Request:\n${order.request_text}\n\n📍 Location:\n${order.delivery_location}`,
+          `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n\n📦 Request:\n${order.request_text}\n\n📍 Location:\n${order.delivery_location}${order.food_cost ? `\n\n🍽 Food total: ${formatNaira(order.food_cost)}` : ""}`,
           {
             message_thread_id: GIGS_TOPIC_ID,
             reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] }
@@ -1444,7 +1782,7 @@ app.post("/flutterwave-webhook", async (req, res) => {
 
       await bot.sendMessage(
         order.runner_id,
-        "💰 Payment received!\n\n📦 Task is now active.\n\n💬 You can now chat with the user — just type any message here and it'll be sent to them.",
+        `💰 Payment received!\n\n📦 Task is now active.${order.food_cost ? `\n\n🍽 Food to buy (${formatNaira(order.food_cost)}):\n${order.request_text}` : ""}\n\n💬 You can now chat with the user — just type any message here and it'll be sent to them.`,
         { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
       );
       await bot.sendMessage(
@@ -1684,6 +2022,7 @@ async function openOrder(id) {
       "<div class='row'><span class='label'>Runner</span><span>" + (order.runner_id ? "@" + (order.runner_username || "unknown") + " (" + order.runner_id + ")" : "unassigned") + "</span></div>" +
       "<div class='row'><span class='label'>Request</span><span>" + (order.request_text || "—") + "</span></div>" +
       "<div class='row'><span class='label'>Location</span><span>" + (order.delivery_location || "—") + "</span></div>" +
+      "<div class='row'><span class='label'>Food cost</span><span>" + naira(order.food_cost) + "</span></div>" +
       "<div class='row'><span class='label'>Agreed price</span><span>" + naira(order.agreed_price) + "</span></div>" +
       "<div class='row'><span class='label'>Runner payout</span><span>" + naira(order.runner_payout) + "</span></div>" +
       "<div class='row'><span class='label'>Total charged</span><span>" + naira(order.total_price) + "</span></div>" +
@@ -1794,7 +2133,7 @@ app.post("/admin/api/orders/:id/reset", async (req, res) => {
     if (order.runner_id) await bot.sendMessage(order.runner_id, `🔄 Task #${order.id} was unassigned by an admin.`).catch(() => {});
     await bot.sendMessage(
       RUNNER_GROUP_ID,
-      `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n\n📦 Request:\n${order.request_text}\n\n📍 Location:\n${order.delivery_location}`,
+      `🚨 REPOSTED REQUEST\n\n🆔 ${order.id}\n\n📦 Request:\n${order.request_text}\n\n📍 Location:\n${order.delivery_location}${order.food_cost ? `\n\n🍽 Food total: ${formatNaira(order.food_cost)}` : ""}`,
       { message_thread_id: GIGS_TOPIC_ID, reply_markup: { inline_keyboard: [[{ text: "💰 Make an offer", callback_data: `offer_${order.id}` }]] } }
     );
     return res.json({ ok: true });
