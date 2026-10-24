@@ -1,6 +1,6 @@
 // Required env vars: BOT_TOKEN, SUPABASE_URL, SUPABASE_KEY, RUNNER_GROUP_ID,
 // BASE_URL, PAYMENT_BASE_URL, FLW_WEBHOOK_SECRET, RUNNER_SIGNUP_FORM_URL,
-// ADMIN_DASHBOARD_USER, ADMIN_DASHBOARD_PASSWORD
+// ADMIN_DASHBOARD_USER, ADMIN_DASHBOARD_PASSWORD   (optional: PRINTER_CHAT_ID)
 
 require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
@@ -31,7 +31,16 @@ const MIN_PRICE              = 50;
 const SUPPORT_EMAIL          = "helply.cu@gmail.com";
 const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
 
-const PRINTER_CHAT_ID      = process.env.PRINTER_CHAT_ID;
+// The printer's numeric Telegram ID. Paid print jobs are sent to this chat.
+// IMPORTANT: the printer must open this bot in Telegram and tap Start at least once;
+// Telegram does not let a bot message someone who hasn't. You can override the ID with
+// the PRINTER_CHAT_ID variable in Railway (it must be the NUMERIC ID, not a @username).
+const DEFAULT_PRINTER_CHAT_ID = "8912345642";
+const PRINTER_CHAT_ID_ENV     = (process.env.PRINTER_CHAT_ID || "").trim();
+const PRINTER_CHAT_ID         = /^-?\d+$/.test(PRINTER_CHAT_ID_ENV) ? PRINTER_CHAT_ID_ENV : DEFAULT_PRINTER_CHAT_ID;
+if (PRINTER_CHAT_ID_ENV && PRINTER_CHAT_ID_ENV !== PRINTER_CHAT_ID) {
+  console.log(`PRINTER_CHAT_ID "${PRINTER_CHAT_ID_ENV}" is not a numeric Telegram ID - using the default instead.`);
+}
 const PRICE_PER_PAGE_BW    = Number(process.env.PRICE_PER_PAGE_BW    || 20);
 const PRICE_PER_PAGE_COLOR = Number(process.env.PRICE_PER_PAGE_COLOR || 100);
 const BINDING_FEE          = Number(process.env.BINDING_FEE          || 200);
@@ -1750,6 +1759,40 @@ bot.on("callback_query", async (q) => {
   }
 });
 
+// ================= PRINTER =================
+
+// Turns Telegram's error into something a human can act on.
+function explainPrinterError(err) {
+  const msg = String((err && err.message) || err || "");
+  if (/blocked by the user/i.test(msg))          return "The printer has blocked the bot. Ask them to unblock it in Telegram.";
+  if (/user is deactivated/i.test(msg))          return "The printer's Telegram account is deactivated.";
+  if (/can't initiate conversation/i.test(msg))  return "The printer hasn't started the bot yet. Ask them to open the Helply bot in Telegram and tap Start (they don't need to finish sign-up), then try again.";
+  if (/chat not found/i.test(msg))               return "Telegram can't find that chat ID. Check it's the printer's numeric Telegram ID, and that they've opened the bot and tapped Start.";
+  if (/wrong file identifier|wrong remote file/i.test(msg)) return "Telegram no longer accepts that file. Ask the student to send the document again.";
+  return msg || "Unknown Telegram error.";
+}
+
+// Sends a paid print job (details + the file) to the printer's Telegram chat.
+// Returns { ok: true } or { ok: false, reason } and never throws.
+async function sendPrintJobToPrinter(order) {
+  const colorLabel = order.print_color === "color" ? "Color" : "Black & White";
+  const caption =
+    `🖨️ Paid print job #${order.id}\n\n${order.print_pages} page(s)\n${colorLabel}\nPaper: ${order.print_paper}\n` +
+    `Binding: ${order.print_binding ? "Yes" : "No"}${order.print_note ? `\nNote: ${order.print_note}` : ""}`;
+
+  try {
+    if (order.print_file_type === "document") {
+      await bot.sendDocument(PRINTER_CHAT_ID, order.print_file_id, { caption });
+    } else {
+      await bot.sendPhoto(PRINTER_CHAT_ID, order.print_file_id, { caption });
+    }
+    return { ok: true };
+  } catch (err) {
+    console.log("PRINTER NOTIFY ERROR:", err.message);
+    return { ok: false, reason: explainPrinterError(err) };
+  }
+}
+
 // ================= PAYMENT SUCCESS =================
 
 app.get("/payment-success", async (req, res) => {
@@ -1784,29 +1827,22 @@ app.post("/flutterwave-webhook", async (req, res) => {
         order.runner_id,
         `💰 Payment received!\n\n📦 Task is now active.${order.food_cost ? `\n\n🍽 Food to buy (${formatNaira(order.food_cost)}):\n${order.request_text}` : ""}\n\n💬 You can now chat with the user — just type any message here and it'll be sent to them.`,
         { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
-      );
+      ).catch(err => console.log("WEBHOOK DM ERROR:", err.message));
       await bot.sendMessage(
         order.user_id,
         "✅ Payment confirmed!\n\n🤝 You can now chat with your Helper — just type any message here and it'll be sent to them.",
         { reply_markup: { inline_keyboard: [[{ text: "✅ End Task", callback_data: `end_${orderId}` }]] } }
-      );
+      ).catch(err => console.log("WEBHOOK DM ERROR:", err.message));
 
+      // Printing: now that payment is confirmed, send the file to the printer.
       if (order.category === "Printing" && order.print_file_id) {
-        if (!PRINTER_CHAT_ID) {
-          console.log("PRINTER_CHAT_ID not set — skipped printer notification for order", orderId);
-        } else {
-          const colorLabel      = order.print_color === "color" ? "Color" : "Black & White";
-          const printerCaption  = `🖨️ Paid print job #${orderId}\n\n${order.print_pages} page(s)\n${colorLabel}\nPaper: ${order.print_paper}\nBinding: ${order.print_binding ? "Yes" : "No"}${order.print_note ? `\nNote: ${order.print_note}` : ""}`;
-
-          try {
-            if (order.print_file_type === "document") {
-              await bot.sendDocument(PRINTER_CHAT_ID, order.print_file_id, { caption: printerCaption });
-            } else {
-              await bot.sendPhoto(PRINTER_CHAT_ID, order.print_file_id, { caption: printerCaption });
-            }
-          } catch (err) {
-            console.log("PRINTER NOTIFY ERROR:", err.message);
-          }
+        const sent = await sendPrintJobToPrinter(order);
+        if (!sent.ok) {
+          console.log(`PRINT JOB #${orderId} NOT DELIVERED TO PRINTER: ${sent.reason}`);
+          await bot.sendMessage(
+            order.runner_id,
+            `⚠️ We couldn't send the print file to the printer automatically (Request ID: ${orderId}). Please contact ${SUPPORT_EMAIL} and we'll sort it out.`
+          ).catch(() => {});
         }
       }
 
@@ -1918,6 +1954,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   </section>
 
   <section>
+    <h2>Printer</h2>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 8px">Check that paid print jobs can reach the printer on Telegram.</p>
+    <div><button class="btn-primary" onclick="testPrinter()">🖨️ Send test message to printer</button></div>
+  </section>
+
+  <section>
     <h2>Banned Users</h2>
     <div id="banned"></div>
     <div class="ban-form">
@@ -2014,6 +2056,8 @@ async function openOrder(id) {
     buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.user_id + "\\"," + id + ")'>🚫 Ban requester</button>");
     if (order.runner_id) buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.runner_id + "\\"," + id + ")'>🚫 Ban runner</button>");
 
+    if (order.category === "Printing" && order.payment_status === "paid") buttons.push("<button class='btn-primary' onclick='resendPrinter(" + id + ")'>🖨️ Resend to printer</button>");
+
     document.getElementById("modalBody").innerHTML =
       "<button class='close-x' onclick='closeModal()'>✕</button>" +
       "<h3>Order #" + order.id + "</h3>" +
@@ -2080,6 +2124,21 @@ async function sendBroadcast() {
     document.getElementById("broadcastMsg").value = "";
     loadBroadcastHistory();
   } catch (err) { toast("Error: " + err.message); }
+}
+
+async function testPrinter() {
+  try {
+    await api("/admin/api/printer/test", { method: "POST" });
+    toast("✅ Test message sent - check the printer's Telegram");
+  } catch (err) { alert("Printer test failed: " + err.message); }
+}
+
+async function resendPrinter(id) {
+  if (!confirm("Send this print job to the printer again?")) return;
+  try {
+    await api("/admin/api/orders/" + id + "/resend-printer", { method: "POST" });
+    toast("✅ Print job sent to the printer");
+  } catch (err) { alert("Could not send to the printer: " + err.message); }
 }
 
 function loadAll() { loadOrders(); loadBanned(); loadBroadcastHistory(); }
@@ -2232,6 +2291,34 @@ app.get("/admin/api/broadcasts", async (req, res) => {
     .limit(10);
   if (error) return res.status(500).json({ error: error.message });
   return res.json({ broadcasts: broadcasts || [] });
+});
+
+// ── Printer ───────────────────────────────────────────────────────────────────
+
+app.post("/admin/api/printer/test", async (req, res) => {
+  try {
+    await bot.sendMessage(PRINTER_CHAT_ID, "🖨️ Test from Helply — if you can see this, paid print jobs will reach you here.");
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "printer_test", { note: `chat ${PRINTER_CHAT_ID}` });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.log("PRINTER TEST ERROR:", err.message);
+    return res.status(400).json({ error: explainPrinterError(err) });
+  }
+});
+
+app.post("/admin/api/orders/:id/resend-printer", async (req, res) => {
+  try {
+    const order = await getOrder(req.params.id);
+    if (!order) return res.status(404).json({ error: "Order not found" });
+    if (order.category !== "Printing" || !order.print_file_id) return res.status(400).json({ error: "This isn't a print order with a file." });
+    if (order.payment_status !== "paid") return res.status(400).json({ error: "This order hasn't been paid for yet." });
+
+    const sent = await sendPrintJobToPrinter(order);
+    if (!sent.ok) return res.status(400).json({ error: sent.reason });
+
+    await logAdminAction(`dashboard:${req.dashboardAdmin}`, "resend_printer", { orderId: order.id });
+    return res.json({ ok: true });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
 });
 
 // ================= SERVER =================
