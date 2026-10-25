@@ -2320,6 +2320,19 @@ app.post("/admin/api/orders/:id/resend-printer", async (req, res) => {
     return res.json({ ok: true });
   } catch (err) { return res.status(500).json({ error: err.message }); }
 });
+// Sends a test message to the printer so you can check the setup without a paid order.
+// Open https://<your-bot-domain>/admin/api/printer-test in a browser (it asks for your dashboard login).
+app.get("/admin/api/printer-test", async (req, res) => {
+  if (!PRINTER_CHAT_ID) {
+    return res.status(400).json({ ok: false, problem: "PRINTER_CHAT_ID is not set on this service" });
+  }
+  try {
+    await bot.sendMessage(PRINTER_CHAT_ID, "🖨️ Test message from Helply — if you can see this, print jobs will reach you.");
+    return res.json({ ok: true, sent_to: PRINTER_CHAT_ID });
+  } catch (err) {
+    return res.status(500).json({ ok: false, sent_to: PRINTER_CHAT_ID, telegram_error: err.message });
+  }
+});
 
 // ================= SERVER =================
 
