@@ -27,7 +27,7 @@ const RUNNER_GROUP_ID        = process.env.RUNNER_GROUP_ID;
 const GIGS_TOPIC_ID          = 2;
 const BASE_URL               = process.env.BASE_URL;
 const PAYMENT_BASE_URL       = process.env.PAYMENT_BASE_URL;
-const MIN_PRICE              = 50;
+const MIN_PRICE              = 5;
 const SUPPORT_EMAIL          = "helply.cu@gmail.com";
 const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
 
@@ -1881,289 +1881,432 @@ function requireDashboardAuth(req, res, next) {
 app.use("/admin", requireDashboardAuth);
 
 const DASHBOARD_HTML = `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Helply Admin</title>
 <style>
-  :root { --bg:#0d0d0d; --card:#1a1613; --border:#33291f; --text:#ffffff; --muted:#c9beb2;
-          --yellow:#f5c542; --orange:#FF6A13; --green:#4ade80; --red:#f87171; --blue:#FF6A13; --purple:#FF6A13; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
-  header { padding:20px 24px; border-bottom:2px solid var(--orange); display:flex; justify-content:space-between; align-items:center; }
-  header h1 { font-size:18px; margin:0; }
-  main { padding:24px; max-width:1000px; margin:0 auto; }
-  section { margin-bottom:32px; }
-  h2 { font-size:14px; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted); margin:0 0 12px; }
-  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-  th, td { text-align:left; padding:10px 12px; font-size:13px; border-bottom:1px solid var(--border); }
-  th { color:var(--muted); font-weight:600; }
-  tr:last-child td { border-bottom:none; }
-  tr:hover td { background:#1c2028; cursor:pointer; }
-  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
-  .badge.open        { background:rgba(245,197,66,0.15);  color:var(--yellow); }
-  .badge.matched     { background:rgba(255,106,19,0.15);  color:var(--orange); }
-  .badge.in_progress { background:rgba(74,222,128,0.15);  color:var(--green);  }
-  .badge.completed   { background:rgba(96,165,250,0.15);  color:var(--blue);   }
-  .badge.voided,
-  .badge.refunded    { background:rgba(248,113,113,0.15); color:var(--red);    }
-  button { font:inherit; cursor:pointer; border:none; border-radius:8px; padding:8px 14px; font-size:13px; font-weight:600; }
-  .btn-primary { background:var(--blue);   color:#0f1115; }
-  .btn-warn    { background:var(--orange); color:#0f1115; }
-  .btn-danger  { background:var(--red);    color:#0f1115; }
-  .btn-purple  { background:var(--purple); color:#0f1115; }
-  .btn-ghost   { background:transparent; border:1px solid var(--border); color:var(--text); }
-  .btn-row     { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
-  .empty       { color:var(--muted); font-size:13px; padding:16px; text-align:center; }
-  .overlay     { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; padding:20px; }
-  .overlay.show { display:flex; }
-  .modal       { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; max-width:480px; width:100%; max-height:85vh; overflow-y:auto; }
-  .modal h3    { margin-top:0; }
-  .modal .row  { display:flex; justify-content:space-between; font-size:13px; padding:6px 0; border-bottom:1px solid var(--border); }
-  .modal .label { color:var(--muted); }
-  .close-x     { float:right; background:none; color:var(--muted); padding:4px 8px; }
-  input[type=text], textarea { width:100%; padding:8px 10px; background:#0f1115; border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:13px; margin-bottom:8px; font-family:inherit; }
-  textarea     { resize:vertical; min-height:80px; }
-  .ban-form, .broadcast-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  .ban-form input { flex:1; min-width:140px; margin-bottom:0; }
-  .broadcast-form textarea { flex:1; margin-bottom:0; }
-  .toast       { position:fixed; bottom:20px; right:20px; background:var(--card); border:1px solid var(--border); padding:12px 16px; border-radius:8px; font-size:13px; display:none; z-index:9999; }
-  .toast.show  { display:block; }
-  .bc-item     { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:8px; font-size:13px; }
-  .bc-meta     { color:var(--muted); font-size:11px; margin-top:4px; }
+:root{
+  --bg:#0d0d0d;--card:#141210;--card2:#1a1714;--border:#2a2420;
+  --text:#fff;--muted:#a89888;--orange:#FF6A13;
+  --green:#4ade80;--red:#f87171;--yellow:#f5c542;--blue:#60a5fa;--purple:#a78bfa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:2px solid var(--orange);position:sticky;top:0;z-index:100;background:var(--bg)}
+.logo{font-size:18px;font-weight:700}.logo span{color:var(--orange)}
+.hdr-right{display:flex;gap:8px;align-items:center}
+nav{display:flex;gap:2px;padding:0 16px;border-bottom:1px solid var(--border);background:var(--card);overflow-x:auto}
+.tab{padding:12px 16px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.tab:hover{color:var(--text)}.tab.active{color:var(--orange);border-bottom-color:var(--orange)}
+.page{display:none;padding:24px;max-width:1100px;margin:0 auto}.page.active{display:block}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px}
+.stat-card .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:6px}
+.stat-card .val{font-size:22px;font-weight:700}.stat-card .sub{font-size:11px;color:var(--muted);margin-top:4px}
+.stat-card.orange .val{color:var(--orange)}.stat-card.green .val{color:var(--green)}
+.stat-card.blue .val{color:var(--blue)}.stat-card.purple .val{color:var(--purple)}
+.section{margin-bottom:28px}
+.section-title{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:700;margin-bottom:10px}
+.filter-bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filter-bar input,.filter-bar select{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit}
+.filter-bar input{flex:1;min-width:160px}.filter-bar select{min-width:130px}
+.tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;background:var(--card);font-size:13px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+th{color:var(--muted);font-weight:600;background:var(--card2)}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:#1f1a17;cursor:pointer}
+.empty{color:var(--muted);padding:24px;text-align:center;font-size:13px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.badge.open{background:rgba(245,197,66,.15);color:var(--yellow)}
+.badge.matched{background:rgba(255,106,19,.15);color:var(--orange)}
+.badge.in_progress{background:rgba(74,222,128,.15);color:var(--green)}
+.badge.completed{background:rgba(96,165,250,.15);color:var(--blue)}
+.badge.cancelled,.badge.voided,.badge.refunded{background:rgba(248,113,113,.15);color:var(--red)}
+.badge.food_runs,.badge.food{background:rgba(245,197,66,.12);color:var(--yellow)}
+.badge.laundry{background:rgba(96,165,250,.12);color:var(--blue)}
+.badge.printing{background:rgba(167,139,250,.12);color:var(--purple)}
+.badge.errands,.badge.other{background:rgba(74,222,128,.12);color:var(--green)}
+.badge.paid{background:rgba(74,222,128,.15);color:var(--green)}
+.badge.pending{background:rgba(255,106,19,.15);color:var(--orange)}
+button{font:inherit;cursor:pointer;border:none;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600}
+.btn-orange{background:var(--orange);color:#fff}.btn-green{background:var(--green);color:#000}
+.btn-red{background:var(--red);color:#fff}.btn-blue{background:var(--blue);color:#000}
+.btn-purple{background:var(--purple);color:#000}.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.icon-btn{padding:4px 10px;font-size:12px}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;padding:16px;z-index:200}
+.overlay.show{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto}
+.modal h3{font-size:16px;margin-bottom:16px}
+.mrow{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid var(--border)}
+.mrow:last-of-type{border-bottom:none}.mrow .lbl{color:var(--muted)}
+.mclose{float:right;background:none;color:var(--muted);font-size:18px;padding:0 4px;cursor:pointer}
+input[type=text],textarea{width:100%;padding:8px 10px;background:#0d0d0d;border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:inherit;margin-bottom:8px}
+textarea{resize:vertical;min-height:80px}
+.ifrm{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.ifrm input{flex:1;min-width:140px;margin-bottom:0}
+.bc-item{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:13px}
+.bc-meta{color:var(--muted);font-size:11px;margin-top:4px}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--card);border:1px solid var(--border);padding:12px 16px;border-radius:10px;font-size:13px;display:none;z-index:999;max-width:340px}
+.toast.show{display:block}
 </style>
 </head>
 <body>
 <header>
-  <h1>🛠️ Helply Admin</h1>
-  <button class="btn-ghost" onclick="loadAll()">⟳ Refresh</button>
+  <div class="logo">Helply <span>Admin</span></div>
+  <div class="hdr-right">
+    <span style="font-size:11px;color:var(--muted)" id="lastRefresh"></span>
+    <button class="btn-ghost" onclick="refreshCurrent()">&#8635; Refresh</button>
+  </div>
 </header>
-<main>
-  <section>
-    <h2>Active Orders</h2>
-    <div id="orders"></div>
-  </section>
+<nav id="navBar">
+  <div class="tab active" onclick="switchTab('overview')">&#128202; Overview</div>
+  <div class="tab" onclick="switchTab('orders')">&#128230; Orders</div>
+  <div class="tab" onclick="switchTab('users')">&#128101; Users</div>
+  <div class="tab" onclick="switchTab('helpers')">&#127939; Helpers</div>
+  <div class="tab" onclick="switchTab('printing')">&#128424; Printing</div>
+  <div class="tab" onclick="switchTab('broadcast')">&#128226; Broadcast</div>
+  <div class="tab" onclick="switchTab('settings')">&#9881; Settings</div>
+</nav>
 
-  <section>
-    <h2>Broadcast Message</h2>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 8px">Sends a message to every user in the system.</p>
-    <textarea id="broadcastMsg" placeholder="Type your message here..."></textarea>
-    <div><button class="btn-purple" onclick="sendBroadcast()">📢 Send to all users</button></div>
-    <div id="broadcastHistory"></div>
-  </section>
-
-  <section>
-    <h2>Printer</h2>
-    <p style="font-size:13px;color:var(--muted);margin:0 0 8px">Check that paid print jobs can reach the printer on Telegram.</p>
-    <div><button class="btn-primary" onclick="testPrinter()">🖨️ Send test message to printer</button></div>
-  </section>
-
-  <section>
-    <h2>Banned Users</h2>
-    <div id="banned"></div>
-    <div class="ban-form">
-      <input type="text" id="banUserId" placeholder="Telegram user ID to ban">
-      <input type="text" id="banReason" placeholder="Reason (optional)">
-      <button class="btn-danger" onclick="banUser()">Ban</button>
-    </div>
-  </section>
-</main>
-<div class="overlay" id="overlay">
-  <div class="modal" id="modalBody"></div>
+<div class="page active" id="page-overview">
+  <div class="stats-grid" id="statsGrid"><div class="empty">Loading...</div></div>
+  <div class="section">
+    <div class="section-title">Recent Orders</div>
+    <div class="tbl-wrap"><div id="recentOrders"><div class="empty">Loading...</div></div></div>
+  </div>
 </div>
+
+<div class="page" id="page-orders">
+  <div class="filter-bar">
+    <input type="text" id="orderSearch" placeholder="Search name, ID, request..." oninput="filterOrders()">
+    <select id="orderStatus" onchange="filterOrders()">
+      <option value="">All statuses</option>
+      <option value="open">Open</option>
+      <option value="matched">Matched</option>
+      <option value="in_progress">In Progress</option>
+      <option value="completed">Completed</option>
+      <option value="cancelled">Cancelled</option>
+      <option value="voided">Voided</option>
+    </select>
+    <select id="orderCategory" onchange="filterOrders()">
+      <option value="">All categories</option>
+      <option value="Food Runs">Food Runs</option>
+      <option value="Laundry">Laundry</option>
+      <option value="Printing">Printing</option>
+      <option value="Errands">Errands</option>
+    </select>
+  </div>
+  <div class="tbl-wrap"><div id="ordersTable"><div class="empty">Loading...</div></div></div>
+</div>
+
+<div class="page" id="page-users">
+  <div class="filter-bar">
+    <input type="text" id="userSearch" placeholder="Search name, email, phone..." oninput="filterUsers()">
+    <select id="userFilter" onchange="filterUsers()">
+      <option value="">All users</option>
+      <option value="banned">Banned only</option>
+      <option value="active">Active only</option>
+    </select>
+  </div>
+  <div class="tbl-wrap"><div id="usersTable"><div class="empty">Loading...</div></div></div>
+  <div style="margin-top:20px">
+    <div class="section-title">Ban a user by Telegram ID</div>
+    <div class="ifrm">
+      <input type="text" id="banUserId" placeholder="Telegram user ID">
+      <input type="text" id="banReason" placeholder="Reason (optional)">
+      <button class="btn-red" onclick="banUser()">Ban</button>
+    </div>
+  </div>
+</div>
+
+<div class="page" id="page-helpers">
+  <div class="tbl-wrap"><div id="helpersTable"><div class="empty">Loading...</div></div></div>
+</div>
+
+<div class="page" id="page-printing">
+  <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+    <button class="btn-blue" onclick="testPrinter()">&#128424; Test printer connection</button>
+    <span style="font-size:12px;color:var(--muted)">Printer ID: ${PRINTER_CHAT_ID}</span>
+  </div>
+  <div class="tbl-wrap"><div id="printTable"><div class="empty">Loading...</div></div></div>
+</div>
+
+<div class="page" id="page-broadcast">
+  <div class="section">
+    <div class="section-title">Send message to all users</div>
+    <textarea id="broadcastMsg" placeholder="Type your message here..."></textarea>
+    <button class="btn-purple" onclick="sendBroadcast()">&#128226; Send to all users</button>
+  </div>
+  <div id="broadcastHistory"></div>
+</div>
+
+<div class="page" id="page-settings">
+  <div class="section">
+    <div class="section-title">Printer</div>
+    <div class="mrow"><span class="lbl">Printer Telegram ID</span><span>${PRINTER_CHAT_ID}</span></div>
+    <div class="btn-row"><button class="btn-blue" onclick="testPrinter()">&#128424; Send test message</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modalBody"></div></div>
 <div class="toast" id="toast"></div>
+
 <script>
-async function api(path, opts) {
-  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+var allOrders=[], allUsers=[], currentTab="overview";
+var TABS=["overview","orders","users","helpers","printing","broadcast","settings"];
+
+function $(id){return document.getElementById(id)}
+async function api(path,opts){
+  var res=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));
+  if(!res.ok) throw new Error((await res.json().catch(function(){return{}})).error||res.statusText);
   return res.json();
 }
-function toast(msg) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 3500);
-}
-function naira(n) { return "\\u20a6" + Number(n || 0).toLocaleString("en-NG"); }
-function closeModal() { document.getElementById("overlay").classList.remove("show"); }
+function toast(msg){var el=$("toast");el.textContent=msg;el.classList.add("show");setTimeout(function(){el.classList.remove("show")},3500)}
+function naira(n){return"\\u20a6"+Number(n||0).toLocaleString("en-NG")}
+function ago(ts){if(!ts)return"--";var s=Math.floor((Date.now()-new Date(ts))/1000);if(s<60)return s+"s ago";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago"}
+function closeModal(){$("overlay").classList.remove("show")}
+function bdg(val,cls){return"<span class='badge "+(cls||String(val||"").toLowerCase().replace(/ /g,"_"))+"'>"+val+"</span>"}
+function catBdg(cat){var c=(cat||"other").toLowerCase().replace(/ /g,"_");var m={"food_runs":"food_runs","food":"food_runs","laundry":"laundry","printing":"printing","errands":"errands"};return"<span class='badge "+(m[c]||"other")+"'>"+(cat||"Other")+"</span>"}
 
-async function loadOrders() {
-  const container = document.getElementById("orders");
-  container.innerHTML = "Loading...";
-  try {
-    const { orders } = await api("/admin/api/orders");
-    if (!orders.length) { container.innerHTML = '<div class="empty">No active orders right now.</div>'; return; }
-    let html = "<table><tr><th>ID</th><th>Status</th><th>Requester</th><th>Runner</th><th>Price</th></tr>";
-    orders.forEach(function(o) {
-      html += "<tr data-id='" + o.id + "' onclick='openOrder(this.dataset.id)'>" +
-        "<td>#" + o.id + "</td>" +
-        "<td><span class='badge " + o.status + "'>" + o.status + "</span></td>" +
-        "<td>@" + (o.user_username || "?") + "</td>" +
-        "<td>" + (o.runner_username ? "@" + o.runner_username : "—") + "</td>" +
-        "<td>" + naira(o.total_price) + "</td>" +
-        "</tr>";
+function switchTab(name){
+  currentTab=name;
+  TABS.forEach(function(t,i){
+    $("page-"+t).classList.toggle("active",t===name);
+    document.querySelectorAll(".tab")[i].classList.toggle("active",t===name);
+  });
+  refreshCurrent();
+}
+
+function refreshCurrent(){
+  $("lastRefresh").textContent="Updated "+new Date().toLocaleTimeString();
+  if(currentTab==="overview"){loadStats();loadRecentOrders();}
+  else if(currentTab==="orders")   loadOrders();
+  else if(currentTab==="users")    loadUsers();
+  else if(currentTab==="helpers")  loadHelpers();
+  else if(currentTab==="printing") loadPrinting();
+  else if(currentTab==="broadcast")loadBroadcastHistory();
+}
+setInterval(function(){if(currentTab==="overview"||currentTab==="orders")refreshCurrent();},60000);
+
+async function loadStats(){
+  $("statsGrid").innerHTML="<div class='empty'>Loading...</div>";
+  try{
+    var d=await api("/admin/api/stats");
+    $("statsGrid").innerHTML=[
+      ["Total Users",    d.totalUsers,       "blue",  "all time"],
+      ["Active Orders",  d.activeOrders,     "orange","open + in progress"],
+      ["Done Today",     d.completedToday,   "green", "completed today"],
+      ["Revenue Today",  naira(d.revenueToday),  "orange","Helply cut today"],
+      ["Revenue Week",   naira(d.revenueWeek),   "green", "this week"],
+      ["Revenue Month",  naira(d.revenueMonth),  "green", "this month"],
+      ["Top Category",   d.topCategory||"--","purple","by completed orders"],
+      ["Active Helpers", d.activeHelpers,    "blue",  "completed >= 1 task"],
+    ].map(function(r){return"<div class='stat-card "+r[2]+"'><div class='lbl'>"+r[0]+"</div><div class='val'>"+r[1]+"</div><div class='sub'>"+r[3]+"</div></div>"}).join("");
+  }catch(e){$("statsGrid").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+
+async function loadRecentOrders(){
+  $("recentOrders").innerHTML="<div class='empty'>Loading...</div>";
+  try{var d=await api("/admin/api/orders?limit=8");renderOrderTbl(d.orders,"recentOrders",true);}
+  catch(e){$("recentOrders").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+
+async function loadOrders(){
+  $("ordersTable").innerHTML="<div class='empty'>Loading...</div>";
+  try{var d=await api("/admin/api/orders?limit=200");allOrders=d.orders;filterOrders();}
+  catch(e){$("ordersTable").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+function filterOrders(){
+  var q=($("orderSearch")||{value:""}).value.toLowerCase();
+  var st=($("orderStatus")||{value:""}).value;
+  var cat=($("orderCategory")||{value:""}).value;
+  var f=allOrders.filter(function(o){
+    return(!st||o.status===st)&&(!cat||(o.category||"")===cat)&&
+    (!q||[o.id,o.requester_name,o.helper_name,o.request_text].join(" ").toLowerCase().includes(q));
+  });
+  renderOrderTbl(f,"ordersTable",false);
+}
+function renderOrderTbl(orders,id,mini){
+  if(!orders||!orders.length){$(id).innerHTML="<div class='empty'>No orders found.</div>";return;}
+  var h="<table><thead><tr><th>ID</th><th>Status</th><th>Category</th><th>Requester</th><th>Helper</th>"+(mini?"":"<th>Request</th>")+"<th>Total</th><th>Created</th></tr></thead><tbody>";
+  orders.forEach(function(o){
+    var req=o.requester_name||("@"+(o.user_username||"unknown"));
+    var hlp=o.helper_name||(o.runner_username?"@"+o.runner_username:"--");
+    h+="<tr data-id='"+o.id+"' onclick='openOrder(this.dataset.id)'><td>#"+o.id+"</td><td>"+bdg(o.status)+"</td><td>"+catBdg(o.category)+"</td><td>"+req+"</td><td>"+hlp+"</td>"+(mini?"":"<td style='max-width:180px;white-space:normal'>"+(o.request_text||"--").slice(0,80)+"</td>")+"<td>"+naira(o.total_price)+"</td><td>"+ago(o.created_at)+"</td></tr>";
+  });
+  h+="</tbody></table>";
+  $(id).innerHTML=h;
+}
+
+async function loadUsers(){
+  $("usersTable").innerHTML="<div class='empty'>Loading...</div>";
+  try{var d=await api("/admin/api/users");allUsers=d.users;filterUsers();}
+  catch(e){$("usersTable").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+function filterUsers(){
+  var q=($("userSearch")||{value:""}).value.toLowerCase();
+  var f=($("userFilter")||{value:""}).value;
+  var list=allUsers.filter(function(u){
+    return(!f||(f==="banned"?u.banned:!u.banned))&&(!q||[u.full_name,u.email,u.phone,u.username,u.id].join(" ").toLowerCase().includes(q));
+  });
+  if(!list.length){$("usersTable").innerHTML="<div class='empty'>No users found.</div>";return;}
+  var h="<table><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Phone</th><th>Joined</th><th>Status</th><th></th></tr></thead><tbody>";
+  list.forEach(function(u){
+    h+="<tr><td>"+(u.full_name||"--")+"</td><td>"+(u.username?"@"+u.username:"--")+"</td><td>"+(u.email||"--")+"</td><td>"+(u.phone||"--")+"</td><td>"+ago(u.created_at)+"</td><td>"+(u.banned?bdg("Banned","voided"):bdg("Active","in_progress"))+"</td><td>"+(u.banned?"<button class='btn-ghost icon-btn' onclick='unbanUser(\\""+u.id+"\\")'>Unban</button>":"<button class='btn-red icon-btn' onclick='quickBan(\\""+u.id+"\\")'>Ban</button>")+"</td></tr>";
+  });
+  h+="</tbody></table>";$("usersTable").innerHTML=h;
+}
+async function quickBan(uid){
+  var r=prompt("Ban reason (leave blank to skip):");if(r===null)return;
+  try{await api("/admin/api/users/"+uid+"/ban",{method:"POST",body:JSON.stringify({reason:r||null})});toast("User banned");loadUsers();}
+  catch(e){toast("Error: "+e.message);}
+}
+async function banUser(){
+  var uid=$("banUserId").value.trim(),reason=$("banReason").value.trim();
+  if(!uid)return toast("Enter a user ID");
+  try{await api("/admin/api/users/"+uid+"/ban",{method:"POST",body:JSON.stringify({reason:reason||null})});toast("User "+uid+" banned");$("banUserId").value="";$("banReason").value="";loadUsers();}
+  catch(e){toast("Error: "+e.message);}
+}
+async function unbanUser(uid){
+  try{await api("/admin/api/users/"+uid+"/unban",{method:"POST"});toast("Unbanned");loadUsers();}
+  catch(e){toast("Error: "+e.message);}
+}
+
+async function loadHelpers(){
+  $("helpersTable").innerHTML="<div class='empty'>Loading...</div>";
+  try{
+    var d=await api("/admin/api/helpers");
+    if(!d.helpers.length){$("helpersTable").innerHTML="<div class='empty'>No Helpers have completed a task yet.</div>";return;}
+    var h="<table><thead><tr><th>Name</th><th>Username</th><th>Tasks Done</th><th>Total Earned</th><th>Last Active</th></tr></thead><tbody>";
+    d.helpers.forEach(function(hh){h+="<tr><td>"+(hh.full_name||"--")+"</td><td>"+(hh.username?"@"+hh.username:"--")+"</td><td>"+hh.tasks_completed+"</td><td>"+naira(hh.total_earned)+"</td><td>"+ago(hh.last_active)+"</td></tr>";});
+    h+="</tbody></table>";$("helpersTable").innerHTML=h;
+  }catch(e){$("helpersTable").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+
+async function loadPrinting(){
+  $("printTable").innerHTML="<div class='empty'>Loading...</div>";
+  try{
+    var d=await api("/admin/api/printing");
+    if(!d.orders.length){$("printTable").innerHTML="<div class='empty'>No print orders yet.</div>";return;}
+    var h="<table><thead><tr><th>ID</th><th>Status</th><th>Requester</th><th>Pages</th><th>Color</th><th>Paper</th><th>Binding</th><th>Payment</th><th>Created</th><th></th></tr></thead><tbody>";
+    d.orders.forEach(function(o){
+      var paid=o.payment_status==="paid";
+      h+="<tr><td>#"+o.id+"</td><td>"+bdg(o.status)+"</td><td>"+(o.requester_name||"--")+"</td><td>"+(o.print_pages||"--")+"</td><td>"+(o.print_color==="color"?"Color":"B&W")+"</td><td>"+(o.print_paper||"--")+"</td><td>"+(o.print_binding?"Yes":"No")+"</td><td>"+(paid?bdg("Paid","paid"):bdg("Pending","pending"))+"</td><td>"+ago(o.created_at)+"</td><td>"+(paid?"<button class='btn-purple icon-btn' onclick='resendPrinter("+o.id+")'>Resend</button>":"")+"</td></tr>";
     });
-    html += "</table>";
-    container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = '<div class="empty">Error: ' + err.message + '</div>';
-  }
+    h+="</tbody></table>";$("printTable").innerHTML=h;
+  }catch(e){$("printTable").innerHTML="<div class='empty'>Error: "+e.message+"</div>";}
+}
+async function testPrinter(){
+  try{await api("/admin/api/printer/test",{method:"POST"});toast("Test message sent — check the printer Telegram");}
+  catch(e){alert("Printer test failed: "+e.message);}
+}
+async function resendPrinter(id){
+  if(!confirm("Resend this print job to the printer?"))return;
+  try{await api("/admin/api/orders/"+id+"/resend-printer",{method:"POST"});toast("Sent to printer");}
+  catch(e){alert("Could not send: "+e.message);}
 }
 
-async function loadBanned() {
-  const container = document.getElementById("banned");
-  container.innerHTML = "Loading...";
-  try {
-    const { users } = await api("/admin/api/users/banned");
-    if (!users.length) { container.innerHTML = '<div class="empty">No banned users.</div>'; return; }
-    let html = "<table><tr><th>User ID</th><th>Username</th><th>Reason</th><th></th></tr>";
-    users.forEach(function(u) {
-      html += "<tr><td>" + u.id + "</td><td>@" + (u.username || "unknown") + "</td><td>" + (u.ban_reason || "—") + "</td>" +
-        "<td><button class='btn-ghost' onclick='unbanUser(\\"" + u.id + "\\")'>Unban</button></td></tr>";
-    });
-    html += "</table>";
-    container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = '<div class="empty">Error: ' + err.message + '</div>';
-  }
+async function openOrder(id){
+  try{
+    var o=(await api("/admin/api/orders/"+id)).order;
+    var req=o.requester_name||("@"+(o.user_username||o.user_id));
+    var hlp=o.helper_name||(o.runner_username?"@"+o.runner_username:"unassigned");
+    var rows=[
+      ["Status",       bdg(o.status)+" / "+bdg(o.payment_status||"pending")],
+      ["Category",     catBdg(o.category)],
+      ["Requester",    req+"<small style='color:var(--muted);margin-left:6px'>"+o.user_id+"</small>"],
+      ["Helper",       hlp+(o.runner_id?"<small style='color:var(--muted);margin-left:6px'>"+o.runner_id+"</small>":"")],
+      ["Request",      "<span style='white-space:normal'>"+(o.request_text||"--")+"</span>"],
+      ["Location",     o.delivery_location||"--"],
+      ["Agreed fee",   naira(o.agreed_price)],
+    ];
+    if(o.food_cost)  rows.push(["Food cost",   naira(o.food_cost)]);
+    if(o.print_cost) rows.push(["Print cost",  naira(o.print_cost)]);
+    rows.push(["Helper payout", naira(o.runner_payout)]);
+    rows.push(["Student pays",  naira(o.total_price)]);
+    rows.push(["Created",       o.created_at?new Date(o.created_at).toLocaleString():"--"]);
+    var btns=[];
+    if(o.status!=="completed") btns.push("<button class='btn-green' onclick='resolveOrder("+id+",\\"complete\\")'>Force complete</button>");
+    if(o.status==="matched"||o.status==="in_progress") btns.push("<button class='btn-orange' onclick='resolveOrder("+id+",\\"reset\\")'>Reset to open</button>");
+    if(o.payment_status==="paid") btns.push("<button class='btn-orange' onclick='resolveOrder("+id+",\\"refund\\")'>Mark refunded</button>");
+    btns.push("<button class='btn-red' onclick='resolveOrder("+id+",\\"void\\")'>Void</button>");
+    btns.push("<button class='btn-ghost' onclick='quickBan(\\""+o.user_id+"\\")'>Ban requester</button>");
+    if(o.runner_id) btns.push("<button class='btn-ghost' onclick='quickBan(\\""+o.runner_id+"\\")'>Ban helper</button>");
+    if(o.category==="Printing"&&o.payment_status==="paid") btns.push("<button class='btn-purple' onclick='resendPrinter("+id+")'>Resend to printer</button>");
+    $("modalBody").innerHTML="<button class='mclose' onclick='closeModal()'>x</button><h3>Order #"+o.id+"</h3>"+rows.map(function(r){return"<div class='mrow'><span class='lbl'>"+r[0]+"</span><span>"+r[1]+"</span></div>"}).join("")+"<div class='btn-row'>"+btns.join("")+"</div>";
+    $("overlay").classList.add("show");
+  }catch(e){toast("Error: "+e.message);}
+}
+async function resolveOrder(id,action){
+  try{await api("/admin/api/orders/"+id+"/"+action,{method:"POST"});toast("Order #"+id+" updated ("+action+")");closeModal();refreshCurrent();}
+  catch(e){toast("Error: "+e.message);}
 }
 
-async function loadBroadcastHistory() {
-  const container = document.getElementById("broadcastHistory");
-  try {
-    const { broadcasts } = await api("/admin/api/broadcasts");
-    if (!broadcasts.length) { container.innerHTML = ""; return; }
-    let html = '<div style="font-size:12px;color:var(--muted);margin:12px 0 6px">Recent broadcasts</div>';
-    broadcasts.forEach(function(b) {
-      html += "<div class='bc-item'>" + b.message + "<div class='bc-meta'>" + new Date(b.created_at).toLocaleString() + " · " + (b.sent_count || "?") + " recipients</div></div>";
-    });
-    container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = "";
-  }
+async function loadBroadcastHistory(){
+  try{
+    var d=await api("/admin/api/broadcasts");
+    if(!d.broadcasts.length){$("broadcastHistory").innerHTML="";return;}
+    var h="<div class='section-title' style='margin:16px 0 8px'>Recent broadcasts</div>";
+    d.broadcasts.forEach(function(b){h+="<div class='bc-item'>"+b.message+"<div class='bc-meta'>"+new Date(b.created_at).toLocaleString()+" - "+(b.sent_count||"?")+" recipients</div></div>";});
+    $("broadcastHistory").innerHTML=h;
+  }catch(e){}
+}
+async function sendBroadcast(){
+  var msg=$("broadcastMsg").value.trim();
+  if(!msg)return toast("Type a message first");
+  if(!confirm("Send to ALL users?"))return;
+  try{var d=await api("/admin/api/broadcast",{method:"POST",body:JSON.stringify({message:msg})});toast("Sent to "+d.sent+" users"+(d.failed>0?" ("+d.failed+" failed)":""));$("broadcastMsg").value="";loadBroadcastHistory();}
+  catch(e){toast("Error: "+e.message);}
 }
 
-async function openOrder(id) {
-  id = Number(id);
-  try {
-    const { order } = await api("/admin/api/orders/" + id);
-    const buttons = [];
-    if (order.status !== "completed") buttons.push("<button class='btn-primary' onclick='resolveOrder(" + id + ",\\"complete\\")'>✅ Force complete</button>");
-    if (order.status === "matched" || order.status === "in_progress") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\\"reset\\")'>🔄 Reset to open</button>");
-    if (order.payment_status === "paid") buttons.push("<button class='btn-warn' onclick='resolveOrder(" + id + ",\\"refund\\")'>💵 Mark refunded</button>");
-    buttons.push("<button class='btn-danger' onclick='resolveOrder(" + id + ",\\"void\\")'>🗑 Void</button>");
-    buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.user_id + "\\"," + id + ")'>🚫 Ban requester</button>");
-    if (order.runner_id) buttons.push("<button class='btn-ghost' onclick='banFromOrder(\\"" + order.runner_id + "\\"," + id + ")'>🚫 Ban runner</button>");
-
-    if (order.category === "Printing" && order.payment_status === "paid") buttons.push("<button class='btn-primary' onclick='resendPrinter(" + id + ")'>🖨️ Resend to printer</button>");
-
-    document.getElementById("modalBody").innerHTML =
-      "<button class='close-x' onclick='closeModal()'>✕</button>" +
-      "<h3>Order #" + order.id + "</h3>" +
-      "<div class='row'><span class='label'>Status</span><span>" + order.status + " / " + order.payment_status + "</span></div>" +
-      "<div class='row'><span class='label'>Requester</span><span>@" + (order.user_username || "unknown") + " (" + order.user_id + ")</span></div>" +
-      "<div class='row'><span class='label'>Runner</span><span>" + (order.runner_id ? "@" + (order.runner_username || "unknown") + " (" + order.runner_id + ")" : "unassigned") + "</span></div>" +
-      "<div class='row'><span class='label'>Request</span><span>" + (order.request_text || "—") + "</span></div>" +
-      "<div class='row'><span class='label'>Location</span><span>" + (order.delivery_location || "—") + "</span></div>" +
-      "<div class='row'><span class='label'>Food cost</span><span>" + naira(order.food_cost) + "</span></div>" +
-      "<div class='row'><span class='label'>Agreed price</span><span>" + naira(order.agreed_price) + "</span></div>" +
-      "<div class='row'><span class='label'>Runner payout</span><span>" + naira(order.runner_payout) + "</span></div>" +
-      "<div class='row'><span class='label'>Total charged</span><span>" + naira(order.total_price) + "</span></div>" +
-      "<div class='btn-row'>" + buttons.join("") + "</div>";
-    document.getElementById("overlay").classList.add("show");
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function resolveOrder(id, action) {
-  try {
-    await api("/admin/api/orders/" + id + "/" + action, { method: "POST" });
-    toast("Order #" + id + " updated (" + action + ")");
-    closeModal();
-    loadOrders();
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function banFromOrder(userId, orderId) {
-  try {
-    await api("/admin/api/users/" + userId + "/ban", { method: "POST", body: JSON.stringify({ reason: "Banned from order #" + orderId }) });
-    toast("User " + userId + " banned");
-    closeModal();
-    loadBanned();
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function banUser() {
-  const userId = document.getElementById("banUserId").value.trim();
-  const reason = document.getElementById("banReason").value.trim();
-  if (!userId) return toast("Enter a user ID first");
-  try {
-    await api("/admin/api/users/" + userId + "/ban", { method: "POST", body: JSON.stringify({ reason: reason || null }) });
-    toast("User " + userId + " banned");
-    document.getElementById("banUserId").value = "";
-    document.getElementById("banReason").value = "";
-    loadBanned();
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function unbanUser(userId) {
-  try {
-    await api("/admin/api/users/" + userId + "/unban", { method: "POST" });
-    toast("User " + userId + " unbanned");
-    loadBanned();
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function sendBroadcast() {
-  const message = document.getElementById("broadcastMsg").value.trim();
-  if (!message) return toast("Type a message first");
-  if (!confirm("Send this message to ALL users?")) return;
-  try {
-    const { sent, failed } = await api("/admin/api/broadcast", { method: "POST", body: JSON.stringify({ message }) });
-    toast("Sent to " + sent + " users" + (failed > 0 ? " (" + failed + " failed)" : ""));
-    document.getElementById("broadcastMsg").value = "";
-    loadBroadcastHistory();
-  } catch (err) { toast("Error: " + err.message); }
-}
-
-async function testPrinter() {
-  try {
-    await api("/admin/api/printer/test", { method: "POST" });
-    toast("✅ Test message sent - check the printer's Telegram");
-  } catch (err) { alert("Printer test failed: " + err.message); }
-}
-
-async function resendPrinter(id) {
-  if (!confirm("Send this print job to the printer again?")) return;
-  try {
-    await api("/admin/api/orders/" + id + "/resend-printer", { method: "POST" });
-    toast("✅ Print job sent to the printer");
-  } catch (err) { alert("Could not send to the printer: " + err.message); }
-}
-
-function loadAll() { loadOrders(); loadBanned(); loadBroadcastHistory(); }
-loadAll();
+loadStats();loadRecentOrders();
 </script>
 </body>
-</html>`;
+</html>
+`;
 
 app.get("/admin", (req, res) => res.send(DASHBOARD_HTML));
 
 app.get("/admin/api/orders", async (req, res) => {
+  const limit  = Math.min(Number(req.query.limit) || 50, 500);
   const { data: orders, error } = await supabase
     .from("orders")
-    .select("id, status, payment_status, user_username, runner_username, total_price")
-    .in("status", ["open", "matched", "in_progress"])
+    .select("id, status, payment_status, user_id, user_username, runner_id, runner_username, total_price, agreed_price, runner_payout, food_cost, print_cost, request_text, delivery_location, category, created_at")
     .order("id", { ascending: false })
-    .limit(50);
+    .limit(limit);
   if (error) return res.status(500).json({ error: error.message });
-  return res.json({ orders: orders || [] });
+
+  // Attach real names from the users table
+  const userIds = [...new Set([
+    ...(orders||[]).map(o => o.user_id).filter(Boolean),
+    ...(orders||[]).map(o => o.runner_id).filter(Boolean)
+  ])];
+  let nameMap = {};
+  if (userIds.length) {
+    const { data: users } = await supabase.from("users").select("id, full_name, username").in("id", userIds);
+    (users || []).forEach(u => { nameMap[u.id] = u.full_name || null; });
+  }
+  const enriched = (orders || []).map(o => ({
+    ...o,
+    requester_name: nameMap[o.user_id] || null,
+    helper_name:    nameMap[o.runner_id] || null,
+  }));
+  return res.json({ orders: enriched });
 });
 
 app.get("/admin/api/orders/:id", async (req, res) => {
   const order = await getOrder(req.params.id);
   if (!order) return res.status(404).json({ error: "Order not found" });
-  return res.json({ order });
+  const ids = [order.user_id, order.runner_id].filter(Boolean);
+  let nameMap = {};
+  if (ids.length) {
+    const { data: users } = await supabase.from("users").select("id, full_name").in("id", ids);
+    (users || []).forEach(u => { nameMap[u.id] = u.full_name || null; });
+  }
+  return res.json({ order: { ...order, requester_name: nameMap[order.user_id] || null, helper_name: nameMap[order.runner_id] || null } });
 });
 
 app.post("/admin/api/orders/:id/complete", async (req, res) => {
@@ -2224,8 +2367,18 @@ app.post("/admin/api/orders/:id/void", async (req, res) => {
   } catch (err) { return res.status(500).json({ error: err.message }); }
 });
 
+app.get("/admin/api/users", async (req, res) => {
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("id, username, full_name, email, phone, banned, ban_reason, accepted_terms, created_at")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.json({ users: users || [] });
+});
+
 app.get("/admin/api/users/banned", async (req, res) => {
-  const { data: users, error } = await supabase.from("users").select("id, username, ban_reason").eq("banned", true);
+  const { data: users, error } = await supabase.from("users").select("id, username, full_name, ban_reason").eq("banned", true);
   if (error) return res.status(500).json({ error: error.message });
   return res.json({ users: users || [] });
 });
@@ -2248,6 +2401,114 @@ app.post("/admin/api/users/:id/unban", async (req, res) => {
     await logAdminAction(`dashboard:${req.dashboardAdmin}`, "unban_user", { targetUserId: targetId });
     await bot.sendMessage(targetId, "✅ Your Helply account has been reinstated. Send /start to continue.").catch(() => {});
     return res.json({ ok: true });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+app.get("/admin/api/helpers", async (req, res) => {
+  try {
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select("runner_id, runner_payout, created_at")
+      .eq("status", "completed")
+      .not("runner_id", "is", null);
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Group by runner
+    const map = {};
+    (orders || []).forEach(o => {
+      if (!map[o.runner_id]) map[o.runner_id] = { tasks: 0, earned: 0, last: null };
+      map[o.runner_id].tasks++;
+      map[o.runner_id].earned += Number(o.runner_payout || 0);
+      if (!map[o.runner_id].last || o.created_at > map[o.runner_id].last) map[o.runner_id].last = o.created_at;
+    });
+
+    const ids = Object.keys(map);
+    let nameMap = {};
+    if (ids.length) {
+      const { data: users } = await supabase.from("users").select("id, username, full_name").in("id", ids);
+      (users || []).forEach(u => { nameMap[u.id] = u; });
+    }
+
+    const helpers = ids.map(id => ({
+      id,
+      username:        (nameMap[id] || {}).username || null,
+      full_name:       (nameMap[id] || {}).full_name || null,
+      tasks_completed: map[id].tasks,
+      total_earned:    map[id].earned,
+      last_active:     map[id].last
+    })).sort((a, b) => b.tasks_completed - a.tasks_completed);
+
+    return res.json({ helpers });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+});
+
+// ── Stats ──────────────────────────────────────────────────────────────────
+
+app.get("/admin/api/stats", async (req, res) => {
+  try {
+    const now       = new Date();
+    const todayStr  = now.toISOString().slice(0, 10);
+    const weekAgo   = new Date(now - 7  * 86400000).toISOString();
+    const monthAgo  = new Date(now - 30 * 86400000).toISOString();
+
+    const [usersRes, ordersRes, completedRes] = await Promise.all([
+      supabase.from("users").select("id", { count: "exact", head: true }),
+      supabase.from("orders").select("status").in("status", ["open", "matched", "in_progress"]),
+      supabase.from("orders").select("runner_payout, agreed_price, total_price, category, created_at, runner_id")
+        .eq("status", "completed")
+    ]);
+
+    const completed = completedRes.data || [];
+
+    const todayCompleted  = completed.filter(o => o.created_at && o.created_at.startsWith(todayStr));
+    const weekCompleted   = completed.filter(o => o.created_at && o.created_at >= weekAgo);
+    const monthCompleted  = completed.filter(o => o.created_at && o.created_at >= monthAgo);
+
+    // Helply cut = total_price - runner_payout (payout already computed at 90% of agreed_price)
+    const cut = rows => rows.reduce((s, o) => s + Math.max(0, Number(o.total_price || 0) - Number(o.runner_payout || 0)), 0);
+
+    // Category counts
+    const catCounts = {};
+    completed.forEach(o => { const c = o.category || "Other"; catCounts[c] = (catCounts[c] || 0) + 1; });
+    const topCategory = Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "--";
+
+    // Active helpers = distinct runner_ids in completed orders
+    const activeHelpers = new Set(completed.map(o => o.runner_id).filter(Boolean)).size;
+
+    return res.json({
+      totalUsers:     usersRes.count || 0,
+      activeOrders:   (ordersRes.data || []).length,
+      completedToday: todayCompleted.length,
+      revenueToday:   cut(todayCompleted),
+      revenueWeek:    cut(weekCompleted),
+      revenueMonth:   cut(monthCompleted),
+      topCategory,
+      activeHelpers
+    });
+  } catch (err) { return res.status(500).json({ error: err.message }); }
+});
+
+// ── Printing jobs ──────────────────────────────────────────────────────────
+
+app.get("/admin/api/printing", async (req, res) => {
+  try {
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select("id, status, payment_status, user_id, user_username, print_pages, print_color, print_paper, print_binding, print_note, print_file_id, created_at")
+      .eq("category", "Printing")
+      .order("id", { ascending: false })
+      .limit(100);
+    if (error) return res.status(500).json({ error: error.message });
+
+    const ids = [...new Set((orders || []).map(o => o.user_id).filter(Boolean))];
+    let nameMap = {};
+    if (ids.length) {
+      const { data: users } = await supabase.from("users").select("id, full_name").in("id", ids);
+      (users || []).forEach(u => { nameMap[u.id] = u.full_name || null; });
+    }
+    return res.json({ orders: (orders || []).map(o => ({ ...o, requester_name: nameMap[o.user_id] || null })) });
   } catch (err) { return res.status(500).json({ error: err.message }); }
 });
 
