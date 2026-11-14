@@ -838,6 +838,663 @@ const FOOD_RESTAURANTS = [
         { id: "pr_xchicken", name: "Extra Chicken (Topping)", short: "Extra Chicken", price: 500 }
       ]}
     ]
+  },
+  {
+    "id": "ss",
+    "name": "Suya Spot",
+    "active": true,
+    "groups": [
+      {
+        "id": "special",
+        "label": "🥩 Special Suya",
+        "items": [
+          {
+            "id": "ss_special",
+            "name": "Special Suya",
+            "short": "Special Suya",
+            "price": 1000
+          }
+        ]
+      },
+      {
+        "id": "suya",
+        "label": "🥩 Suya (choose amount)",
+        "items": [
+          {
+            "id": "ss_suya_1000",
+            "name": "Suya (₦1,000)",
+            "short": "₦1,000 Suya",
+            "price": 1000,
+            "size": "₦1,000 option"
+          },
+          {
+            "id": "ss_suya_1500",
+            "name": "Suya (₦1,500)",
+            "short": "₦1,500 Suya",
+            "price": 1500,
+            "size": "₦1,500 option"
+          },
+          {
+            "id": "ss_suya_2000",
+            "name": "Suya (₦2,000)",
+            "short": "₦2,000 Suya",
+            "price": 2000,
+            "size": "₦2,000 option"
+          },
+          {
+            "id": "ss_suya_2500",
+            "name": "Suya (₦2,500)",
+            "short": "₦2,500 Suya",
+            "price": 2500,
+            "size": "₦2,500 option"
+          },
+          {
+            "id": "ss_suya_3000",
+            "name": "Suya (₦3,000)",
+            "short": "₦3,000 Suya",
+            "price": 3000,
+            "size": "₦3,000 option"
+          },
+          {
+            "id": "ss_suya_3500",
+            "name": "Suya (₦3,500)",
+            "short": "₦3,500 Suya",
+            "price": 3500,
+            "size": "₦3,500 option"
+          },
+          {
+            "id": "ss_suya_4000",
+            "name": "Suya (₦4,000)",
+            "short": "₦4,000 Suya",
+            "price": 4000,
+            "size": "₦4,000 option"
+          },
+          {
+            "id": "ss_suya_4500",
+            "name": "Suya (₦4,500)",
+            "short": "₦4,500 Suya",
+            "price": 4500,
+            "size": "₦4,500 option"
+          },
+          {
+            "id": "ss_suya_5000",
+            "name": "Suya (₦5,000)",
+            "short": "₦5,000 Suya",
+            "price": 5000,
+            "size": "₦5,000 option"
+          },
+          {
+            "id": "ss_suya_500",
+            "name": "Suya (₦500)",
+            "short": "₦500 Suya",
+            "price": 500,
+            "size": "₦500 option"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "gc",
+    "name": "Grandpa Chips",
+    "active": true,
+    "groups": [
+      {
+        "id": "potato",
+        "label": "🍟 Potato Chips",
+        "items": [
+          {
+            "id": "gc_potato_extralarge",
+            "name": "Potato Chips (Extra Large)",
+            "short": "Potato Extra Large",
+            "price": 2600,
+            "size": "Extra Large"
+          },
+          {
+            "id": "gc_potato_large",
+            "name": "Potato Chips (Large)",
+            "short": "Potato Large",
+            "price": 2100,
+            "size": "Large"
+          },
+          {
+            "id": "gc_potato_regular",
+            "name": "Potato Chips (Regular)",
+            "short": "Potato Regular",
+            "price": 1900,
+            "size": "Regular"
+          },
+          {
+            "id": "gc_potato_small",
+            "name": "Potato Chips (Small)",
+            "short": "Potato Small",
+            "price": 1500,
+            "size": "Small"
+          }
+        ]
+      },
+      {
+        "id": "yam",
+        "label": "🍠 Yam Chips",
+        "items": [
+          {
+            "id": "gc_yam_extralarge",
+            "name": "Yam Chips (Extra Large)",
+            "short": "Yam Extra Large",
+            "price": 2600,
+            "size": "Extra Large"
+          },
+          {
+            "id": "gc_yam_large",
+            "name": "Yam Chips (Large)",
+            "short": "Yam Large",
+            "price": 2100,
+            "size": "Large"
+          }
+        ]
+      },
+      {
+        "id": "extras",
+        "label": "➕ Extras / Proteins",
+        "items": [
+          {
+            "id": "gc_beef",
+            "name": "Beef",
+            "short": "Beef",
+            "price": 200
+          },
+          {
+            "id": "gc_chickenlarge",
+            "name": "Chicken (Large)",
+            "short": "Chicken (Large)",
+            "price": 2100
+          },
+          {
+            "id": "gc_egg",
+            "name": "Egg",
+            "short": "Egg",
+            "price": 300
+          },
+          {
+            "id": "gc_eggsauce",
+            "name": "Egg Sauce",
+            "short": "Egg Sauce",
+            "price": 500
+          },
+          {
+            "id": "gc_fish",
+            "name": "Fish",
+            "short": "Fish",
+            "price": 1900
+          },
+          {
+            "id": "gc_gizzard",
+            "name": "Gizzard",
+            "short": "Gizzard",
+            "price": 500
+          },
+          {
+            "id": "gc_plasticpack",
+            "name": "Plastic Pack",
+            "short": "Plastic Pack",
+            "price": 200
+          },
+          {
+            "id": "gc_sausage",
+            "name": "Sausage",
+            "short": "Sausage",
+            "price": 300
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "bu",
+    "name": "Burritos",
+    "active": true,
+    "groups": [
+      {
+        "id": "burrito",
+        "label": "🌯 Burrito",
+        "items": [
+          {
+            "id": "bu_burrito",
+            "name": "Burrito",
+            "short": "Burrito",
+            "price": 1000
+          }
+        ]
+      },
+      {
+        "id": "chicken",
+        "label": "🍗 Chicken Only",
+        "items": [
+          {
+            "id": "bu_chicken_mega",
+            "name": "Chicken Only (Mega)",
+            "short": "Chicken Mega",
+            "price": 3700,
+            "size": "Mega"
+          },
+          {
+            "id": "bu_chicken_regular",
+            "name": "Chicken Only (Regular)",
+            "short": "Chicken Regular",
+            "price": 1000,
+            "size": "Regular"
+          },
+          {
+            "id": "bu_chicken_super",
+            "name": "Chicken Only (Super)",
+            "short": "Chicken Super",
+            "price": 1500,
+            "size": "Super"
+          }
+        ]
+      },
+      {
+        "id": "mega",
+        "label": "🌯 Mega Pack",
+        "items": [
+          {
+            "id": "bu_mega_1",
+            "name": "Mega Pack: Chicken + 1 Sausage",
+            "short": "Mega + 1 sausage",
+            "price": 4700,
+            "size": "1 sausage"
+          },
+          {
+            "id": "bu_mega_2",
+            "name": "Mega Pack: Chicken + 2 Sausages",
+            "short": "Mega + 2 sausages",
+            "price": 5200,
+            "size": "2 sausages"
+          },
+          {
+            "id": "bu_mega_3",
+            "name": "Mega Pack: Chicken + 3 Sausages",
+            "short": "Mega + 3 sausages",
+            "price": 5500,
+            "size": "3 sausages"
+          },
+          {
+            "id": "bu_mega_4",
+            "name": "Mega Pack: Chicken + 4 Sausages",
+            "short": "Mega + 4 sausages",
+            "price": 5800,
+            "size": "4 sausages"
+          },
+          {
+            "id": "bu_mega_5",
+            "name": "Mega Pack: Chicken + 5 Sausages",
+            "short": "Mega + 5 sausages",
+            "price": 6100,
+            "size": "5 sausages"
+          }
+        ]
+      },
+      {
+        "id": "regular",
+        "label": "🌯 Regular Pack",
+        "items": [
+          {
+            "id": "bu_regular_1",
+            "name": "Regular Pack: Chicken + 1 Sausage",
+            "short": "Regular + 1 sausage",
+            "price": 2300,
+            "size": "1 sausage"
+          },
+          {
+            "id": "bu_regular_2",
+            "name": "Regular Pack: Chicken + 2 Sausages",
+            "short": "Regular + 2 sausages",
+            "price": 2600,
+            "size": "2 sausages"
+          },
+          {
+            "id": "bu_regular_3",
+            "name": "Regular Pack: Chicken + 3 Sausages",
+            "short": "Regular + 3 sausages",
+            "price": 2900,
+            "size": "3 sausages"
+          },
+          {
+            "id": "bu_regular_4",
+            "name": "Regular Pack: Chicken + 4 Sausages",
+            "short": "Regular + 4 sausages",
+            "price": 3200,
+            "size": "4 sausages"
+          },
+          {
+            "id": "bu_regular_5",
+            "name": "Regular Pack: Chicken + 5 Sausages",
+            "short": "Regular + 5 sausages",
+            "price": 3500,
+            "size": "5 sausages"
+          }
+        ]
+      },
+      {
+        "id": "super",
+        "label": "🌯 Super Pack",
+        "items": [
+          {
+            "id": "bu_super_1",
+            "name": "Super Pack: Chicken + 1 Sausage",
+            "short": "Super + 1 sausage",
+            "price": 2800,
+            "size": "1 sausage"
+          },
+          {
+            "id": "bu_super_2",
+            "name": "Super Pack: Chicken + 2 Sausages",
+            "short": "Super + 2 sausages",
+            "price": 3100,
+            "size": "2 sausages"
+          },
+          {
+            "id": "bu_super_3",
+            "name": "Super Pack: Chicken + 3 Sausages",
+            "short": "Super + 3 sausages",
+            "price": 3500,
+            "size": "3 sausages"
+          },
+          {
+            "id": "bu_super_4",
+            "name": "Super Pack: Chicken + 4 Sausages",
+            "short": "Super + 4 sausages",
+            "price": 3700,
+            "size": "4 sausages"
+          },
+          {
+            "id": "bu_super_5",
+            "name": "Super Pack: Chicken + 5 Sausages",
+            "short": "Super + 5 sausages",
+            "price": 4000,
+            "size": "5 sausages"
+          }
+        ]
+      },
+      {
+        "id": "sausage",
+        "label": "➕ Sausage",
+        "items": [
+          {
+            "id": "bu_sausage",
+            "name": "Sausage",
+            "short": "Sausage",
+            "price": 300
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "dy",
+    "name": "Delish Yamarita",
+    "active": true,
+    "groups": [
+      {
+        "id": "delish",
+        "label": "🍽️ Delish Pack",
+        "items": [
+          {
+            "id": "dy_delish_1",
+            "name": "Delish Pack + 1 Kebab",
+            "short": "Delish + 1 kebab",
+            "price": 2300,
+            "size": "1 kebab"
+          },
+          {
+            "id": "dy_delish_2",
+            "name": "Delish Pack + 2 Kebabs",
+            "short": "Delish + 2 kebabs",
+            "price": 2700,
+            "size": "2 kebabs"
+          },
+          {
+            "id": "dy_delish_3",
+            "name": "Delish Pack + 3 Kebabs",
+            "short": "Delish + 3 kebabs",
+            "price": 3100,
+            "size": "3 kebabs"
+          },
+          {
+            "id": "dy_delish_4",
+            "name": "Delish Pack + 4 Kebabs",
+            "short": "Delish + 4 kebabs",
+            "price": 3500,
+            "size": "4 kebabs"
+          },
+          {
+            "id": "dy_delish_5",
+            "name": "Delish Pack + 5 Kebabs",
+            "short": "Delish + 5 kebabs",
+            "price": 3900,
+            "size": "5 kebabs"
+          }
+        ]
+      },
+      {
+        "id": "kings",
+        "label": "🍽️ Kings Pack",
+        "items": [
+          {
+            "id": "dy_kings_1",
+            "name": "Kings Pack + 1 Kebab",
+            "short": "Kings + 1 kebab",
+            "price": 3200,
+            "size": "1 kebab"
+          },
+          {
+            "id": "dy_kings_2",
+            "name": "Kings Pack + 2 Kebabs",
+            "short": "Kings + 2 kebabs",
+            "price": 3600,
+            "size": "2 kebabs"
+          },
+          {
+            "id": "dy_kings_3",
+            "name": "Kings Pack + 3 Kebabs",
+            "short": "Kings + 3 kebabs",
+            "price": 4000,
+            "size": "3 kebabs"
+          },
+          {
+            "id": "dy_kings_4",
+            "name": "Kings Pack + 4 Kebabs",
+            "short": "Kings + 4 kebabs",
+            "price": 4400,
+            "size": "4 kebabs"
+          },
+          {
+            "id": "dy_kings_5",
+            "name": "Kings Pack + 5 Kebabs",
+            "short": "Kings + 5 kebabs",
+            "price": 4800,
+            "size": "5 kebabs"
+          }
+        ]
+      },
+      {
+        "id": "royal",
+        "label": "🍽️ Royal Pack",
+        "items": [
+          {
+            "id": "dy_royal_1",
+            "name": "Royal Pack + 1 Kebab",
+            "short": "Royal + 1 kebab",
+            "price": 2700,
+            "size": "1 kebab"
+          },
+          {
+            "id": "dy_royal_2",
+            "name": "Royal Pack + 2 Kebabs",
+            "short": "Royal + 2 kebabs",
+            "price": 3100,
+            "size": "2 kebabs"
+          },
+          {
+            "id": "dy_royal_3",
+            "name": "Royal Pack + 3 Kebabs",
+            "short": "Royal + 3 kebabs",
+            "price": 3500,
+            "size": "3 kebabs"
+          },
+          {
+            "id": "dy_royal_4",
+            "name": "Royal Pack + 4 Kebabs",
+            "short": "Royal + 4 kebabs",
+            "price": 3900,
+            "size": "4 kebabs"
+          },
+          {
+            "id": "dy_royal_5",
+            "name": "Royal Pack + 5 Kebabs",
+            "short": "Royal + 5 kebabs",
+            "price": 4300,
+            "size": "5 kebabs"
+          }
+        ]
+      },
+      {
+        "id": "extras",
+        "label": "➕ Extras",
+        "items": [
+          {
+            "id": "dy_egg",
+            "name": "Egg",
+            "short": "Egg",
+            "price": 300
+          },
+          {
+            "id": "dy_pepperstew",
+            "name": "Pepper Stew",
+            "short": "Pepper Stew",
+            "price": 300
+          },
+          {
+            "id": "dy_ponmo",
+            "name": "Ponmo",
+            "short": "Ponmo",
+            "price": 300
+          },
+          {
+            "id": "dy_sausage",
+            "name": "Sausage",
+            "short": "Sausage",
+            "price": 300
+          }
+        ]
+      }
+    ]
+  },
+  {
+    id: "iv",
+    name: "Ice Vendor",
+    active: true,
+    groups: [
+      { id: "ice", label: "🧊 Ice", items: [
+        { id: "iv_ice", name: "Ice", short: "Ice", price: 200 }
+      ]}
+    ]
+  },
+  {
+    id: "bw",
+    name: "Bread Warmer",
+    active: true,
+    groups: [
+      { id: "regular", label: "🥖 Bread Warmer", items: [
+        { id: "bw_regular_1", name: "Bread Warmer + 1 Sausage", short: "Bread + 1 Sausage", price: 1900, size: "1 Sausage" },
+        { id: "bw_regular_2", name: "Bread Warmer + 2 Sausages", short: "Bread + 2 Sausages", price: 2200, size: "2 Sausages" },
+        { id: "bw_regular_3", name: "Bread Warmer + 3 Sausages", short: "Bread + 3 Sausages", price: 2500, size: "3 Sausages" }
+      ]},
+      { id: "jumbo", label: "🥖 Jumbo Bread Warmer", items: [
+        { id: "bw_jumbo_2", name: "Jumbo Bread Warmer + 2 Sausages", short: "Jumbo + 2 Sausages", price: 2600, size: "2 Sausages" },
+        { id: "bw_jumbo_3", name: "Jumbo Bread Warmer + 3 Sausages", short: "Jumbo + 3 Sausages", price: 2900, size: "3 Sausages" }
+      ]}
+    ]
+  },
+  {
+    id: "fp",
+    name: "The Fruits Place",
+    active: true,
+    groups: [
+      { id: "apple", label: "🍎 Apple", items: [
+        { id: "fp_apple_big", name: "Apple (Big)", short: "Apple Big", price: 800, size: "Big" },
+        { id: "fp_apple_small", name: "Apple (Small)", short: "Apple Small", price: 500, size: "Small" }
+      ]},
+      { id: "bananas", label: "🍌 Bananas", items: [
+        { id: "fp_banana_xl", name: "Bananas (Extra Large)", short: "Bananas XL", price: 1500, size: "Extra Large" },
+        { id: "fp_banana_large", name: "Bananas (Large)", short: "Bananas Large", price: 1000, size: "Large" },
+        { id: "fp_banana_medium", name: "Bananas (Medium)", short: "Bananas Medium", price: 800, size: "Medium" },
+        { id: "fp_banana_small", name: "Bananas (Small)", short: "Bananas Small", price: 500, size: "Small" }
+      ]},
+      { id: "cucumber", label: "🥒 Cucumber", items: [
+        { id: "fp_cucumber_big", name: "Cucumber (Big)", short: "Cucumber Big", price: 800, size: "Big" },
+        { id: "fp_cucumber_small", name: "Cucumber (Small)", short: "Cucumber Small", price: 700, size: "Small" }
+      ]},
+      { id: "salad", label: "🥗 Fruit Salad", items: [
+        { id: "fp_salad_large", name: "Fruit Salad (Large)", short: "Salad Large", price: 3700, size: "Large" },
+        { id: "fp_salad_small", name: "Fruit Salad (Small)", short: "Salad Small", price: 1600, size: "Small" }
+      ]},
+      { id: "grapes", label: "🍇 Grapes", items: [
+        { id: "fp_grapes_big", name: "Grapes (Big)", short: "Grapes Big", price: 5500, size: "Big" },
+        { id: "fp_grapes_small", name: "Grapes (Small)", short: "Grapes Small", price: 3000, size: "Small" }
+      ]},
+      { id: "groundnuts", label: "🥜 Groundnuts", items: [
+        { id: "fp_groundnuts", name: "Groundnuts", short: "Groundnuts", price: 1000 }
+      ]},
+      { id: "lemonade", label: "🍋 Lemonade", items: [
+        { id: "fp_lemonade", name: "Lemonade", short: "Lemonade", price: 1100 }
+      ]},
+      { id: "limejuice", label: "🍋 Lime Juice", items: [
+        { id: "fp_lime_juice", name: "Lime Juice", short: "Lime Juice", price: 1100 }
+      ]},
+      { id: "orange", label: "🍊 Orange", items: [
+        { id: "fp_orange_each", name: "Orange (each)", short: "Orange", price: 200 }
+      ]},
+      { id: "pawpaw", label: "🍈 Pawpaw", items: [
+        { id: "fp_pawpaw_cut", name: "Pawpaw (Cut)", short: "Pawpaw Cut", price: 500 }
+      ]},
+      { id: "pineapple", label: "🍍 Pineapple", items: [
+        { id: "fp_pineapple_cut", name: "Pineapple (Cut)", short: "Pineapple Cut", price: 500 }
+      ]},
+      { id: "redapple", label: "🍎 Red Apple", items: [
+        { id: "fp_red_apple", name: "Red Apple", short: "Red Apple", price: 800 }
+      ]},
+      { id: "smoothies", label: "🥤 Smoothies", items: [
+        { id: "fp_smoothie_bottle", name: "Smoothie (Bottle)", short: "Smoothie Bottle", price: 1300, size: "Bottle" },
+        { id: "fp_smoothie_cup", name: "Smoothie (Cup)", short: "Smoothie Cup", price: 1400, size: "Cup" },
+        { id: "fp_watermelon_smoothie", name: "Watermelon Smoothie", short: "Watermelon Smoothie", price: 1100 }
+      ]},
+      { id: "tangerine", label: "🍊 Tangerine", items: [
+        { id: "fp_tangerine", name: "Tangerine (each)", short: "Tangerine", price: 800 }
+      ]},
+      { id: "tigernut", label: "🥜 Tigernut", items: [
+        { id: "fp_tigernut", name: "Tigernut", short: "Tigernut", price: 500 }
+      ]},
+      { id: "watermelon", label: "🍉 Watermelon", items: [
+        { id: "fp_watermelon_cut", name: "Watermelon (Cut)", short: "Watermelon Cut", price: 500 }
+      ]}
+    ]
+  },
+  {
+    id: "cw",
+    name: "Choice Waffles",
+    active: true,
+    groups: [
+      { id: "waffles", label: "🧇 Vanilla Waffle", items: [
+        { id: "cw_vanilla_one", name: "Vanilla Waffle (One Circle)", short: "Vanilla Waffle", price: 650 }
+      ]},
+      { id: "extras", label: "➕ Extras", items: [
+        { id: "cw_egg_sauce", name: "Egg Sauce", short: "Egg Sauce", price: 200 },
+        { id: "cw_fried_egg", name: "Fried Egg", short: "Fried Egg", price: 200 },
+        { id: "cw_plastic_pack", name: "Plastic Pack", short: "Plastic Pack", price: 200 },
+        { id: "cw_sausage_cut", name: "Sausage (Cut & Peppered)", short: "Sausage", price: 250 }
+      ]}
+    ]
   }
 ];
 
