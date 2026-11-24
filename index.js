@@ -644,6 +644,13 @@ async function finalizePrintingOrder(msg, userId, printData) {
 
 async function finalizeLaundryOrder(msg, userId, state) {
   const { requestText, locationText } = state;
+  const laundryMedia = state.laundryMedia || (msg.photo?.length
+    ? { type: "photo", fileId: msg.photo[msg.photo.length - 1].file_id }
+    : msg.document ? { type: "document", fileId: msg.document.file_id } : null);
+  if (!laundryMedia) {
+    pendingState[userId] = { mode: "laundry_photo_wait", requestText, locationText };
+    return bot.sendMessage(userId, "📸 Please send a photo of what you'd like washed.");
+  }
 
   let taskId;
   try {
@@ -685,10 +692,10 @@ async function finalizeLaundryOrder(msg, userId, state) {
   };
 
   try {
-    if (msg.photo) {
-      await bot.sendPhoto(RUNNER_GROUP_ID, msg.photo[msg.photo.length - 1].file_id, groupOptions);
+    if (laundryMedia.type === "photo") {
+      await bot.sendPhoto(RUNNER_GROUP_ID, laundryMedia.fileId, groupOptions);
     } else {
-      await bot.sendDocument(RUNNER_GROUP_ID, msg.document.file_id, groupOptions);
+      await bot.sendDocument(RUNNER_GROUP_ID, laundryMedia.fileId, groupOptions);
     }
   } catch (err) {
     console.log("LAUNDRY RUNNER GROUP POST ERROR:", err.message);
@@ -1882,10 +1889,22 @@ bot.on("message", async (msg) => {
   }
 
   // ── Laundry: photo of items ───────────────────────────────────────────────
-  if (state?.mode === "laundry_photo_wait") {
-    if (msg.document || msg.photo) return finalizeLaundryOrder(msg, userId, state);
-    if (msg.text) return bot.sendMessage(userId, "📸 Please send a photo of your laundry (not text).");
-    return;
+  if (state?.mode === "laundry_photo_wait" && !isButtonTap) {
+    const laundryMedia = msg.photo?.length
+      ? { type: "photo", fileId: msg.photo[msg.photo.length - 1].file_id }
+      : msg.document ? { type: "document", fileId: msg.document.file_id } : null;
+
+    if (!laundryMedia) {
+      return bot.sendMessage(userId, "📸 Please send a photo of your laundry (not text).");
+    }
+
+    // Also support a request that has already collected its description and location.
+    if (state.requestText && state.locationText) {
+      return finalizeLaundryOrder(msg, userId, { ...state, laundryMedia });
+    }
+
+    pendingState[userId] = { mode: "category_detail", category: "Laundry", laundryMedia };
+    return bot.sendMessage(userId, "✅ Photo received!\n\n📝 Tell me what you need for Laundry:");
   }
 
   if (!msg.text || msg.text.startsWith("/")) return;
@@ -1955,7 +1974,10 @@ bot.on("message", async (msg) => {
     const request = validateRequestText(text);
     if (!request) return bot.sendMessage(userId, requestError(text));
     const requestText = state.category ? `[${state.category}] ${request}` : request;
-    pendingState[userId] = { mode: "location", request: requestText, category: state.category };
+    pendingState[userId] = {
+      mode: "location", request: requestText, category: state.category,
+      ...(state.laundryMedia ? { laundryMedia: state.laundryMedia } : {})
+    };
     return bot.sendMessage(userId, "📍 Where should the Helper meet you or drop this off?");
   }
 
@@ -1971,6 +1993,9 @@ bot.on("message", async (msg) => {
       : "";
 
     if (state.category === "Laundry") {
+      if (state.laundryMedia) {
+        return finalizeLaundryOrder(msg, userId, { requestText, locationText, laundryMedia: state.laundryMedia });
+      }
       pendingState[userId] = { mode: "laundry_photo_wait", requestText, locationText };
       return bot.sendMessage(userId, "📸 Please send a photo of what you'd like washed.");
     }
@@ -2077,6 +2102,12 @@ bot.on("callback_query", async (q) => {
       if (key === "other") {
         pendingState[userId] = { mode: "category_detail", category: null };
         await bot.sendMessage(userId, "📝 Tell me what you need:");
+        return bot.answerCallbackQuery(q.id);
+      }
+
+      if (key === "laundry") {
+        pendingState[userId] = { mode: "laundry_photo_wait" };
+        await bot.sendMessage(userId, "🧺 Laundry request\n\n📸 Please send a photo of what you'd like washed.");
         return bot.answerCallbackQuery(q.id);
       }
 
