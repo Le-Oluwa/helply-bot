@@ -29,7 +29,7 @@ const BASE_URL               = process.env.BASE_URL;
 const PAYMENT_BASE_URL       = process.env.PAYMENT_BASE_URL;
 const MIN_PRICE              = 5;
 const SUPPORT_EMAIL          = "helply.cu@gmail.com";
-const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/P8Gb7zmVHQQEZ9JB7";
+const RUNNER_SIGNUP_FORM_URL = process.env.RUNNER_SIGNUP_FORM_URL || "https://forms.gle/JLmDsxkEqexZ5wk37";
 
 // The printer's numeric Telegram ID. Paid print jobs are sent to this chat.
 // IMPORTANT: the printer must open this bot in Telegram and tap Start at least once;
